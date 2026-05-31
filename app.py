@@ -15,7 +15,7 @@ from data_fetcher import (
     fetch_stock_batch, fetch_history,
     get_symbols_by_cap, ALL_SYMBOLS, CAP_LABELS
 )
-from ai_analyst import get_ai_analysis, get_portfolio_summary
+from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
 
 load_dotenv()
 
@@ -184,7 +184,7 @@ with c5:
 st.markdown("---")
 
 # ── Main tabs ─────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "🗂️ Heatmap"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "⚖️ Compare", "🗂️ Heatmap"])
 
 # ── TAB 1: Screener table ─────────────────────────────────────────────────────
 with tab1:
@@ -299,12 +299,13 @@ with tab2:
 
 # ── TAB 3: AI Analysis ────────────────────────────────────────────────────────
 with tab3:
-    st.markdown("#### Groq llama3-70b · Stock Analysis")
+    st.markdown("#### Groq llama-3.3-70b · Stock Analysis")
 
     ai_col1, ai_col2 = st.columns([1, 2])
 
     with ai_col1:
         ai_sym = st.selectbox("Pick a stock", filtered["Symbol"].tolist(), key="ai_sym")
+        ai_period = st.radio("Chart period", ["1mo", "3mo", "6mo", "1y"], index=2, horizontal=True)
         run_ai = st.button("🤖 Analyse", use_container_width=True)
 
         st.markdown("---")
@@ -317,6 +318,70 @@ with tab3:
         run_portfolio = st.button("📊 Summarise Portfolio", use_container_width=True)
 
     with ai_col2:
+        # Always show the price chart for selected stock
+        with st.spinner(f"Loading {ai_sym} chart…"):
+            ai_hist = fetch_history(ai_sym, ai_period)
+
+        if not ai_hist.empty:
+            ai_hist["SMA20"] = ai_hist["Close"].rolling(20).mean()
+            ai_hist["SMA50"] = ai_hist["Close"].rolling(50).mean()
+
+            # RSI
+            delta = ai_hist["Close"].diff()
+            gain  = delta.where(delta > 0, 0).rolling(14).mean()
+            loss  = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs    = gain / loss.replace(0, float("nan"))
+            ai_hist["RSI"] = 100 - (100 / (1 + rs))
+
+            from plotly.subplots import make_subplots
+            fig_ai = make_subplots(
+                rows=2, cols=1,
+                shared_xaxes=True,
+                row_heights=[0.7, 0.3],
+                vertical_spacing=0.04,
+            )
+
+            # Price + SMAs
+            fig_ai.add_trace(go.Candlestick(
+                x=ai_hist.index,
+                open=ai_hist["Open"], high=ai_hist["High"],
+                low=ai_hist["Low"],  close=ai_hist["Close"],
+                name=ai_sym,
+                increasing_line_color="#22c55e",
+                decreasing_line_color="#ef4444",
+            ), row=1, col=1)
+            fig_ai.add_trace(go.Scatter(
+                x=ai_hist.index, y=ai_hist["SMA20"],
+                name="SMA 20", line=dict(color="#60a5fa", width=1.5)
+            ), row=1, col=1)
+            fig_ai.add_trace(go.Scatter(
+                x=ai_hist.index, y=ai_hist["SMA50"],
+                name="SMA 50", line=dict(color="#f59e0b", width=1.5)
+            ), row=1, col=1)
+
+            # RSI
+            fig_ai.add_trace(go.Scatter(
+                x=ai_hist.index, y=ai_hist["RSI"],
+                name="RSI", line=dict(color="#a78bfa", width=1.5), fill="tozeroy",
+                fillcolor="rgba(167,139,250,0.1)"
+            ), row=2, col=1)
+            fig_ai.add_hline(y=70, line_dash="dash", line_color="#ef4444", line_width=1, row=2, col=1)
+            fig_ai.add_hline(y=30, line_dash="dash", line_color="#22c55e", line_width=1, row=2, col=1)
+
+            fig_ai.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="#0f172a",
+                plot_bgcolor="#0f172a",
+                height=420,
+                margin=dict(l=0, r=0, t=30, b=0),
+                xaxis_rangeslider_visible=False,
+                legend=dict(orientation="h", y=1.04, font=dict(size=11)),
+                title=dict(text=f"{ai_sym} · Price & RSI", font=dict(color="#94a3b8", size=13)),
+            )
+            fig_ai.update_yaxes(title_text="Price (₹)", row=1, col=1)
+            fig_ai.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100])
+            st.plotly_chart(fig_ai, use_container_width=True)
+
         if run_ai:
             stock_row = filtered[filtered["Symbol"] == ai_sym].iloc[0].to_dict()
             with st.spinner(f"Analysing {ai_sym} with Groq…"):
@@ -332,13 +397,13 @@ with tab3:
             st.markdown("")
             st.info(analysis)
 
-            # Quick metrics for that stock
+            # Quick metrics
             row = filtered[filtered["Symbol"] == ai_sym].iloc[0]
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Price",    f"₹{row['Price (₹)']}", f"{row['Change %']:+.2f}%")
-            m2.metric("P/E",      f"{row['P/E']:.1f}")
-            m3.metric("Mkt Cap",  f"₹{row['Mkt Cap (₹Cr)']:,.0f} Cr")
-            m4.metric("Revenue",  f"₹{row['Revenue (₹Cr)']:,.0f} Cr")
+            m1.metric("Price",   f"₹{row['Price (₹)']}", f"{row['Change %']:+.2f}%")
+            m2.metric("P/E",     f"{row['P/E']:.1f}")
+            m3.metric("Mkt Cap", f"₹{row['Mkt Cap (₹Cr)']:,.0f} Cr")
+            m4.metric("Revenue", f"₹{row['Revenue (₹Cr)']:,.0f} Cr")
 
         if run_portfolio and watchlist:
             rows = filtered[filtered["Symbol"].isin(watchlist)].to_dict("records")
@@ -346,8 +411,165 @@ with tab3:
                 summary = get_portfolio_summary(rows)
             st.success(summary)
 
-# ── TAB 4: Heatmap ────────────────────────────────────────────────────────────
+# ── TAB 4: Compare ───────────────────────────────────────────────────────────
 with tab4:
+    st.markdown("#### ⚖️ Stock Comparison & AI Picker")
+
+    cmp_left, cmp_right = st.columns([1, 2])
+
+    with cmp_left:
+        st.markdown("**Pick stocks to compare**")
+        cmp_stocks = st.multiselect(
+            "Select 2–6 stocks",
+            filtered["Symbol"].tolist(),
+            default=filtered["Symbol"].tolist()[:4],
+            max_selections=6,
+        )
+
+        st.markdown("**Your investment priority**")
+        priorities = st.multiselect(
+            "What matters most?",
+            ["Value (low P/E)", "Growth (revenue)", "Dividend income",
+             "Low risk (beta)", "Momentum (52W performance)", "Large market cap"],
+            default=["Value (low P/E)", "Growth (revenue)"],
+        )
+
+        run_compare = st.button("🤖 AI Pick the Best", use_container_width=True, type="primary")
+
+    with cmp_right:
+        if len(cmp_stocks) < 2:
+            st.info("Select at least 2 stocks to compare.")
+        else:
+            cmp_df = filtered[filtered["Symbol"].isin(cmp_stocks)].copy()
+
+            # ── Side-by-side metric cards ─────────────────────────────────
+            st.markdown("**Metrics at a glance**")
+            cols = st.columns(len(cmp_stocks))
+            for i, sym in enumerate(cmp_stocks):
+                row = cmp_df[cmp_df["Symbol"] == sym]
+                if row.empty:
+                    continue
+                r = row.iloc[0]
+                chg_color = "#22c55e" if r["Change %"] >= 0 else "#ef4444"
+                with cols[i]:
+                    st.markdown(f"""
+                    <div style="background:#1e293b;border-radius:10px;padding:12px;
+                                border-top:3px solid #3b82f6;text-align:center">
+                        <div style="font-size:1.1rem;font-weight:700;color:#f1f5f9">{sym}</div>
+                        <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">
+                            {r['Cap Category']} · {r['Sector']}
+                        </div>
+                        <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9">₹{r['Price (₹)']:,.2f}</div>
+                        <div style="color:{chg_color};font-size:0.85rem;font-weight:600">
+                            {r['Change %']:+.2f}%
+                        </div>
+                        <hr style="border-color:#334155;margin:8px 0">
+                        <div style="font-size:0.8rem;color:#94a3b8">
+                            P/E <b style="color:#f1f5f9">{r['P/E']:.1f}</b> &nbsp;|&nbsp;
+                            P/B <b style="color:#f1f5f9">{r['P/B']:.2f}</b><br>
+                            EPS <b style="color:#f1f5f9">₹{r['EPS']:.2f}</b><br>
+                            Rev <b style="color:#f1f5f9">₹{r['Revenue (₹Cr)']:,.0f}Cr</b><br>
+                            Div <b style="color:#f1f5f9">{r['Div Yield %']:.2f}%</b> &nbsp;|&nbsp;
+                            β <b style="color:#f1f5f9">{r['Beta']:.2f}</b>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            st.markdown("")
+
+            # ── Radar chart ───────────────────────────────────────────────
+            st.markdown("**Multi-dimensional radar**")
+
+            radar_metrics = ["Value", "Revenue", "Dividend", "Stability", "Momentum"]
+
+            def normalize(series):
+                mn, mx = series.min(), series.max()
+                if mx == mn:
+                    return pd.Series([50.0] * len(series), index=series.index)
+                return (series - mn) / (mx - mn) * 100
+
+            # Value = inverse P/E (lower P/E → higher score)
+            inv_pe = cmp_df["P/E"].replace(0, float("nan")).apply(lambda x: 1/x if x else 0)
+            cmp_df["_value"]    = normalize(inv_pe)
+            cmp_df["_revenue"]  = normalize(cmp_df["Revenue (₹Cr)"])
+            cmp_df["_dividend"] = normalize(cmp_df["Div Yield %"])
+            # Stability = inverse beta
+            inv_beta = cmp_df["Beta"].replace(0, float("nan")).apply(lambda x: 1/x if x else 0)
+            cmp_df["_stability"] = normalize(inv_beta)
+            # Momentum = position in 52W range
+            hi, lo = cmp_df["52W High"], cmp_df["52W Low"]
+            cmp_df["_momentum"] = normalize(
+                (cmp_df["Price (₹)"] - lo) / (hi - lo).replace(0, float("nan")) * 100
+            )
+
+            fig_radar = go.Figure()
+            colors = ["#3b82f6","#22c55e","#f59e0b","#ef4444","#a78bfa","#ec4899"]
+
+            for i, sym in enumerate(cmp_stocks):
+                row = cmp_df[cmp_df["Symbol"] == sym]
+                if row.empty:
+                    continue
+                r = row.iloc[0]
+                vals = [
+                    r["_value"], r["_revenue"], r["_dividend"],
+                    r["_stability"], r["_momentum"]
+                ]
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=vals + [vals[0]],
+                    theta=radar_metrics + [radar_metrics[0]],
+                    name=sym,
+                    fill="toself",
+                    fillcolor=f"rgba({int(colors[i][1:3],16)},{int(colors[i][3:5],16)},{int(colors[i][5:7],16)},0.15)",
+                    line=dict(color=colors[i], width=2),
+                ))
+
+            fig_radar.update_layout(
+                polar=dict(
+                    radialaxis=dict(visible=True, range=[0, 100],
+                                    gridcolor="#334155", tickfont=dict(color="#64748b")),
+                    angularaxis=dict(gridcolor="#334155", tickfont=dict(color="#94a3b8")),
+                    bgcolor="#0f172a",
+                ),
+                paper_bgcolor="#0f172a",
+                template="plotly_dark",
+                height=380,
+                margin=dict(l=40, r=40, t=40, b=20),
+                legend=dict(orientation="h", y=-0.05),
+                showlegend=True,
+            )
+            st.plotly_chart(fig_radar, use_container_width=True)
+
+            # ── AI Comparison ─────────────────────────────────────────────
+            if run_compare and priorities:
+                cmp_rows = cmp_df[cmp_df["Symbol"].isin(cmp_stocks)].to_dict("records")
+                with st.spinner("Groq is picking the best stock…"):
+                    verdict = compare_stocks(cmp_rows, priorities)
+
+                st.markdown("---")
+                st.markdown("**🤖 AI Verdict**")
+
+                # Highlight winner
+                winner = ""
+                for sym in cmp_stocks:
+                    if sym in verdict[:60]:
+                        winner = sym
+                        break
+
+                if winner:
+                    st.markdown(
+                        f"<div style='background:#166534;border-radius:8px;padding:10px 16px;"
+                        f"font-size:1.1rem;font-weight:700;color:#bbf7d0;margin-bottom:10px'>"
+                        f"🏆 Best Pick: {winner}</div>",
+                        unsafe_allow_html=True,
+                    )
+                st.info(verdict)
+
+            elif run_compare:
+                st.warning("Please select at least one investment priority.")
+
+
+# ── TAB 5: Heatmap ────────────────────────────────────────────────────────────
+with tab5:
     st.markdown("#### Market Cap Heatmap by Sector")
 
     hm_data = filtered[filtered["Mkt Cap (₹Cr)"] > 0].copy()

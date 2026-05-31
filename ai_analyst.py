@@ -42,7 +42,7 @@ Be concise. Start with "Signal: BUY/HOLD/SELL".
     try:
         client = _get_client()
         resp = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0.3,
@@ -50,6 +50,54 @@ Be concise. Start with "Signal: BUY/HOLD/SELL".
         return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"AI analysis unavailable: {e}"
+
+
+def compare_stocks(stocks: list[dict], priorities: list[str]) -> str:
+    """
+    Given a list of stock dicts and user priority labels,
+    return an AI ranking with a clear winner and reasoning.
+    """
+    priority_str = ", ".join(priorities) if priorities else "overall value"
+
+    lines = []
+    for s in stocks:
+        lines.append(
+            f"• {s['Symbol']} ({s['Cap Category']}, {s['Sector']}): "
+            f"Price ₹{s['Price (₹)']} | P/E {s['P/E']} | P/B {s['P/B']} | "
+            f"EPS ₹{s['EPS']} | Rev ₹{s['Revenue (₹Cr)']}Cr | "
+            f"Div {s['Div Yield %']}% | Beta {s['Beta']} | "
+            f"52W H/L ₹{s['52W High']}/₹{s['52W Low']} | "
+            f"Mkt Cap ₹{s['Mkt Cap (₹Cr)']}Cr | Change {s['Change %']}%"
+        )
+
+    prompt = f"""You are an expert Indian stock market analyst. Compare these NSE stocks and pick the BEST one for an investor prioritising: {priority_str}.
+
+Stocks:
+{chr(10).join(lines)}
+
+Your response must follow this exact format:
+🏆 WINNER: [SYMBOL]
+📊 RANKING: 1. [SYM] 2. [SYM] 3. [SYM] ...
+
+WHY [WINNER]:
+2-3 sentences on why it wins for the given priorities.
+
+QUICK TAKE ON OTHERS:
+One sentence each on the remaining stocks.
+
+Be direct, data-driven, specific to Indian market context."""
+
+    try:
+        client = _get_client()
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.3,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Comparison unavailable: {e}"
 
 
 def get_portfolio_summary(stocks: list[dict]) -> str:
@@ -70,7 +118,7 @@ Mention overall sentiment, sector concentration risk, and one actionable insight
     try:
         client = _get_client()
         resp = client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.4,
