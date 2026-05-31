@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from data_fetcher import (
     fetch_stock_batch, fetch_history,
-    get_symbols_by_cap, ALL_SYMBOLS, CAP_LABELS
+    get_all_symbols, load_universe,
 )
 from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
 
@@ -128,7 +128,7 @@ with st.sidebar:
         ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "Revenue (₹Cr)", "P/E", "EPS"],
     )
     sort_asc = st.checkbox("Ascending", value=False)
-    max_rows  = st.slider("Max rows", 10, 200, 50, step=10)
+    max_rows  = st.slider("Max rows", 10, 500, 100, step=10)
 
     st.markdown("---")
     refresh = st.button("🔄 Refresh Data", use_container_width=True)
@@ -136,7 +136,7 @@ with st.sidebar:
         st.cache_data.clear()
 
 # ── Load data ─────────────────────────────────────────────────────────────────
-symbols = get_symbols_by_cap(cap_filter)
+symbols = get_all_symbols(cap_filter)
 
 with st.spinner(f"Loading {len(symbols)} stocks…"):
     df = fetch_stock_batch(symbols)
