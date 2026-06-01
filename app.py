@@ -820,32 +820,139 @@ with tab5:
 
 # ── TAB 6: Heatmap ────────────────────────────────────────────────────────────
 with tab6:
-    st.markdown("#### Market Cap Heatmap by Sector")
+    st.markdown("#### Market Cap Heatmap — hover any tile for aggregated stats")
 
     hm_data = filtered[filtered["Mkt Cap (₹Cr)"] > 0].copy()
+
     if not hm_data.empty:
-        fig3 = px.treemap(
-            hm_data,
-            path=["Cap Category", "Sector", "Symbol"],
-            values="Mkt Cap (₹Cr)",
-            color="Change %",
-            color_continuous_scale=["#ef4444", "#1e293b", "#22c55e"],
-            color_continuous_midpoint=0,
-            custom_data=["Name", "Price (₹)", "P/E"],
-            title="",
-        )
-        fig3.update_traces(
-            textinfo="label+value",
-            hovertemplate="<b>%{label}</b><br>%{customdata[0]}<br>₹%{customdata[1]}<br>P/E: %{customdata[2]}<extra></extra>"
-        )
+        # Build treemap nodes manually so every level (Cap → Sector → Stock)
+        # gets its own pre-computed hover stats
+        ids, labels, parents, values, colors, customdata = [], [], [], [], [], []
+
+        def _agg_hover(df: pd.DataFrame, n_label: str) -> list:
+            """Return list of 8 formatted strings for the hover template."""
+            avg_pe  = df["P/E"].replace(0, pd.NA).mean()
+            avg_pb  = df["P/B"].replace(0, pd.NA).mean()
+            avg_eps = df["EPS"].replace(0, pd.NA).mean()
+            avg_div = df["Div Yield %"].mean()
+            avg_chg = df["Change %"].mean()
+            avg_bet = df["Beta"].replace(0, pd.NA).mean()
+            return [
+                n_label,
+                f"₹{df['Mkt Cap (₹Cr)'].sum():,.0f} Cr",
+                f"{avg_pe:.1f}"  if pd.notna(avg_pe)  else "—",
+                f"{avg_pb:.2f}"  if pd.notna(avg_pb)  else "—",
+                f"₹{df['Revenue (₹Cr)'].sum():,.0f} Cr",
+                f"₹{df['Net Inc (₹Cr)'].sum():,.0f} Cr",
+                f"₹{avg_eps:.2f}" if pd.notna(avg_eps) else "—",
+                f"{avg_div:.2f}%",
+                f"{avg_chg:+.2f}%",
+                f"{avg_bet:.2f}"  if pd.notna(avg_bet)  else "—",
+                str(len(df)),
+            ]
+
+        for cap in hm_data["Cap Category"].unique():
+            cap_df = hm_data[hm_data["Cap Category"] == cap]
+
+            ids.append(cap)
+            labels.append(cap)
+            parents.append("")
+            values.append(cap_df["Mkt Cap (₹Cr)"].sum())
+            colors.append(cap_df["Change %"].mean())
+            customdata.append(_agg_hover(cap_df, cap))
+
+            for sector in cap_df["Sector"].unique():
+                sec_df  = cap_df[cap_df["Sector"] == sector]
+                sec_id  = f"{cap}|{sector}"
+
+                ids.append(sec_id)
+                labels.append(sector)
+                parents.append(cap)
+                values.append(sec_df["Mkt Cap (₹Cr)"].sum())
+                colors.append(sec_df["Change %"].mean())
+                customdata.append(_agg_hover(sec_df, sector))
+
+                for _, stk in sec_df.iterrows():
+                    stk_id = f"{cap}|{sector}|{stk['Symbol']}"
+                    ids.append(stk_id)
+                    labels.append(stk["Symbol"])
+                    parents.append(sec_id)
+                    values.append(stk["Mkt Cap (₹Cr)"])
+                    colors.append(stk["Change %"])
+                    customdata.append([
+                        stk["Name"],
+                        f"₹{stk['Mkt Cap (₹Cr)']:,.0f} Cr",
+                        f"{stk['P/E']:.1f}"  if stk["P/E"]  else "—",
+                        f"{stk['P/B']:.2f}"  if stk["P/B"]  else "—",
+                        f"₹{stk['Revenue (₹Cr)']:,.0f} Cr",
+                        f"₹{stk['Net Inc (₹Cr)']:,.0f} Cr",
+                        f"₹{stk['EPS']:.2f}" if stk["EPS"]  else "—",
+                        f"{stk['Div Yield %']:.2f}%",
+                        f"{stk['Change %']:+.2f}%",
+                        f"{stk['Beta']:.2f}"  if stk["Beta"] else "—",
+                        f"₹{stk['Price (₹)']:,.2f}",
+                    ])
+
+        # Normalise colors to 0–1 for the colorscale
+        all_c  = [c for c in colors if c is not None]
+        c_min, c_max = min(all_c), max(all_c)
+        c_range = (c_max - c_min) or 1
+
+        fig3 = go.Figure(go.Treemap(
+            ids=ids,
+            labels=labels,
+            parents=parents,
+            values=values,
+            customdata=customdata,
+            marker=dict(
+                colors=colors,
+                colorscale=[
+                    [0,   "#ef4444"],
+                    [0.5, "#1e3a5f"],
+                    [1,   "#22c55e"],
+                ],
+                cmid=0,
+                cmin=c_min,
+                cmax=c_max,
+                showscale=True,
+                colorbar=dict(
+                    title="Change %",
+                    tickfont=dict(color="#94a3b8"),
+                    titlefont=dict(color="#94a3b8"),
+                ),
+            ),
+            textinfo="label",
+            # The hover template is the same for all levels;
+            # customdata[0] is either the cap/sector name or the stock's full name
+            hovertemplate=(
+                "<b>%{label}</b>  <i>%{customdata[0]}</i><br>"
+                "──────────────────────<br>"
+                "Mkt Cap    : %{customdata[1]}<br>"
+                "Avg P/E    : %{customdata[2]}<br>"
+                "Avg P/B    : %{customdata[3]}<br>"
+                "Revenue    : %{customdata[4]}<br>"
+                "Net Income : %{customdata[5]}<br>"
+                "Avg EPS    : %{customdata[6]}<br>"
+                "Div Yield  : %{customdata[7]}<br>"
+                "Avg Chg    : %{customdata[8]}<br>"
+                "Avg Beta   : %{customdata[9]}<br>"
+                "── %{customdata[10]} ──"
+                "<extra></extra>"
+            ),
+        ))
+
         fig3.update_layout(
             template="plotly_dark",
             paper_bgcolor="#0f172a",
-            height=580,
+            height=600,
             margin=dict(l=0, r=0, t=10, b=0),
-            coloraxis_colorbar=dict(title="Change %"),
         )
         st.plotly_chart(fig3, use_container_width=True)
+
+        st.caption(
+            "Hover over Cap Category or Sector tiles to see aggregated P/E, P/B, Revenue, "
+            "Net Income, EPS, Dividend Yield, Beta · Individual stock tiles show per-stock values"
+        )
     else:
         st.info("No data available for heatmap with current filters.")
 
