@@ -24,6 +24,8 @@ from data_fetcher import fetch_single_stock, fetch_history
 
 load_dotenv()
 
+import datetime as _dt
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="NSE Stock Analyser",
@@ -32,113 +34,302 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# ── Session state ─────────────────────────────────────────────────────────────
+if "cap_filter" not in st.session_state:
+    st.session_state["cap_filter"] = "All"
+
+# ── Design System CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    /* Main gradient header */
-    .main-header {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        padding: 1.5rem 2rem;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
-        border-left: 4px solid #e94560;
-    }
-    .main-header h1 { color: #fff; margin: 0; font-size: 1.8rem; }
-    .main-header p  { color: #a0aec0; margin: 4px 0 0 0; font-size: 0.9rem; }
+/* ── Tokens ────────────────────────────────────────────────── */
+:root {
+  --bg:          #07111d;
+  --bg-card:     #0d1e30;
+  --bg-raised:   #142438;
+  --bg-hover:    #1a2f45;
+  --border:      #1e3450;
+  --border-subtle: #152130;
+  --blue:   #3b82f6;
+  --green:  #10b981;
+  --red:    #ef4444;
+  --amber:  #f59e0b;
+  --purple: #8b5cf6;
+  --cyan:   #06b6d4;
+  --text:   #e2e8f0;
+  --muted:  #64748b;
+  --soft:   #94a3b8;
+}
 
-    /* Metric cards */
-    .metric-card {
-        background: #1e293b;
-        border-radius: 10px;
-        padding: 1rem 1.2rem;
-        border-left: 3px solid #3b82f6;
-        margin-bottom: 0.5rem;
-    }
-    .metric-card.green { border-left-color: #22c55e; }
-    .metric-card.red   { border-left-color: #ef4444; }
-    .metric-card.gold  { border-left-color: #f59e0b; }
+/* ── Layout ────────────────────────────────────────────────── */
+.main .block-container { padding: 0.75rem 1.5rem 2rem; max-width: 1600px; }
+.stApp { background: var(--bg); }
 
-    /* Signal badges */
-    .badge-buy  { background:#166534; color:#bbf7d0; padding:3px 10px; border-radius:20px; font-size:0.8rem; font-weight:600; }
-    .badge-sell { background:#7f1d1d; color:#fecaca; padding:3px 10px; border-radius:20px; font-size:0.8rem; font-weight:600; }
-    .badge-hold { background:#78350f; color:#fde68a; padding:3px 10px; border-radius:20px; font-size:0.8rem; font-weight:600; }
+/* ── Header ────────────────────────────────────────────────── */
+.nse-header {
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(120deg, #0d1e30 0%, #0f2640 60%, #0d1e30 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem 1.6rem;
+  margin-bottom: 1rem;
+}
+.nse-header-left h1 {
+  margin: 0; font-size: 1.55rem; font-weight: 800;
+  background: linear-gradient(90deg, #60a5fa, #34d399);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.nse-header-left p { margin: 2px 0 0; font-size: 0.8rem; color: var(--muted); }
+.nse-header-right { display: flex; gap: 20px; align-items: center; }
+.market-badge {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 12px;
+  font-size: 0.78rem; color: var(--soft);
+}
+.dot-open  { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+             box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+.dot-closed { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-    /* Cap filter pills */
-    div[data-testid="stRadio"] label { cursor: pointer; }
+/* ── Cap Filter Pills ──────────────────────────────────────── */
+.cap-bar {
+  display: flex; gap: 8px; align-items: center;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 8px 12px; margin-bottom: 1rem;
+}
+.cap-label { font-size: 0.7rem; color: var(--muted); font-weight: 600;
+             text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; }
 
-    /* Table tweaks */
-    .dataframe thead th { background: #1e293b !important; color: #94a3b8 !important; }
+/* Style Streamlit buttons inside .cap-bar to look like pills */
+.cap-bar .stButton > button {
+  border-radius: 20px !important; font-size: 0.78rem !important;
+  font-weight: 600 !important; padding: 4px 14px !important;
+  border: 1px solid var(--border) !important;
+  background: transparent !important; color: var(--soft) !important;
+  transition: all 0.18s !important;
+}
+.cap-bar .stButton > button:hover {
+  background: var(--bg-hover) !important;
+  border-color: var(--blue) !important; color: var(--text) !important;
+}
 
-    /* Sidebar */
-    section[data-testid="stSidebar"] { background: #0f172a; }
-    section[data-testid="stSidebar"] .stMarkdown { color: #94a3b8; }
+/* ── Stats Bar ─────────────────────────────────────────────── */
+.stats-bar {
+  display: flex; gap: 10px; margin-bottom: 1rem; flex-wrap: wrap;
+}
+.stat-chip {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 16px; flex: 1; min-width: 120px;
+}
+.stat-chip .sc-label { font-size: 0.68rem; color: var(--muted);
+                       text-transform: uppercase; letter-spacing: .08em; }
+.stat-chip .sc-value { font-size: 1.15rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+.stat-chip .sc-sub   { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
+.sc-green { color: var(--green) !important; }
+.sc-red   { color: var(--red)   !important; }
+.sc-blue  { color: var(--blue)  !important; }
+.sc-amber { color: var(--amber) !important; }
+
+/* ── Cards ─────────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px; margin-bottom: 10px;
+}
+.card-accent-blue   { border-left: 3px solid var(--blue);  }
+.card-accent-green  { border-left: 3px solid var(--green); }
+.card-accent-red    { border-left: 3px solid var(--red);   }
+.card-accent-amber  { border-left: 3px solid var(--amber); }
+.card-accent-purple { border-left: 3px solid var(--purple);}
+.card h4 { margin: 0 0 8px; font-size: 0.8rem; color: var(--muted);
+           text-transform: uppercase; letter-spacing: .07em; }
+
+/* ── Badges ─────────────────────────────────────────────────── */
+.badge {
+  display: inline-block; padding: 3px 11px; border-radius: 20px;
+  font-size: 0.75rem; font-weight: 700; letter-spacing: .04em;
+}
+.badge-buy    { background: rgba(16,185,129,.15); color: #34d399;
+                border: 1px solid rgba(16,185,129,.3); }
+.badge-sell   { background: rgba(239,68,68,.15);  color: #f87171;
+                border: 1px solid rgba(239,68,68,.3); }
+.badge-hold   { background: rgba(245,158,11,.15); color: #fbbf24;
+                border: 1px solid rgba(245,158,11,.3); }
+.badge-pos    { background: rgba(16,185,129,.12); color: #34d399;
+                border: 1px solid rgba(16,185,129,.25); font-size: 0.7rem; }
+.badge-neg    { background: rgba(239,68,68,.12);  color: #f87171;
+                border: 1px solid rgba(239,68,68,.25); font-size: 0.7rem; }
+.badge-neu    { background: rgba(100,116,139,.12); color: #94a3b8;
+                border: 1px solid rgba(100,116,139,.25); font-size: 0.7rem; }
+
+/* ── Cap category colours ───────────────────────────────────── */
+.cap-blue-chip { background: rgba(59,130,246,.12); color: #60a5fa;
+                 border: 1px solid rgba(59,130,246,.25); }
+.cap-large     { background: rgba(16,185,129,.12); color: #34d399;
+                 border: 1px solid rgba(16,185,129,.25); }
+.cap-mid       { background: rgba(245,158,11,.12); color: #fbbf24;
+                 border: 1px solid rgba(245,158,11,.25); }
+.cap-small     { background: rgba(239,68,68,.12);  color: #f87171;
+                 border: 1px solid rgba(239,68,68,.25); }
+
+/* ── Article cards ──────────────────────────────────────────── */
+.article-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 9px; padding: 10px 14px; margin-bottom: 6px;
+  transition: border-color .18s;
+}
+.article-card:hover { border-color: var(--blue); }
+
+/* ── Source pills ───────────────────────────────────────────── */
+.src-pill {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 0.68rem; font-weight: 600; border: 1px solid;
+}
+
+/* ── Section headings ───────────────────────────────────────── */
+.section-hd {
+  font-size: 0.68rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .1em;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 6px; margin: 16px 0 10px;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] {
+  background: #060f1a;
+  border-right: 1px solid var(--border);
+}
+section[data-testid="stSidebar"] .stMarkdown p { color: var(--muted); font-size: 0.8rem; }
+section[data-testid="stSidebar"] h3 {
+  font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .1em; margin-bottom: 6px; margin-top: 18px;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 4px; background: var(--bg-card);
+  border-radius: 10px; padding: 4px; border: 1px solid var(--border);
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: 8px; padding: 6px 14px;
+  font-size: 0.8rem; font-weight: 600; color: var(--muted);
+  background: transparent; border: none;
+}
+.stTabs [aria-selected="true"] {
+  background: var(--bg-raised) !important; color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+.stTabs [data-baseweb="tab-panel"] { padding-top: 16px; }
+
+/* ── Compare metric cards ───────────────────────────────────── */
+.cmp-card {
+  background: var(--bg-card); border-radius: 10px;
+  padding: 12px; border-top: 3px solid var(--blue);
+  text-align: center; height: 100%;
+}
+.cmp-card .cmp-sym  { font-size: 1.05rem; font-weight: 800; color: var(--text); }
+.cmp-card .cmp-cat  { font-size: 0.7rem;  color: var(--muted); margin: 2px 0 8px; }
+.cmp-card .cmp-price{ font-size: 1.3rem;  font-weight: 700; color: var(--text); }
+.cmp-card .cmp-row  { font-size: 0.78rem; color: var(--soft); margin-top: 4px; }
+.cmp-card .cmp-row b{ color: var(--text); }
+.cmp-card hr { border-color: var(--border); margin: 8px 0; }
+
+/* ── Table ───────────────────────────────────────────────────── */
+.dataframe { border: none !important; }
+.dataframe thead th {
+  background: var(--bg-raised) !important;
+  color: var(--muted) !important;
+  font-size: 0.72rem !important;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.dataframe tbody tr:hover td { background: var(--bg-hover) !important; }
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--blue); }
 </style>
 """, unsafe_allow_html=True)
 
+# ── Market open/close helper ──────────────────────────────────────────────────
+def _market_status():
+    now = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=5, minutes=30)))  # IST
+    is_weekday = now.weekday() < 5
+    open_time  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+    close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    is_open    = is_weekday and open_time <= now <= close_time
+    return is_open, now.strftime("%a %d %b %Y · %H:%M IST")
+
+_mkt_open, _mkt_time = _market_status()
+
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="main-header">
+st.markdown(f"""
+<div class="nse-header">
+  <div class="nse-header-left">
     <h1>📈 NSE Stock Analyser</h1>
-    <p>Live data from National Stock Exchange · AI-powered insights via Groq</p>
+    <p>Live market data · AI analysis via Groq · Screener.in deep dive</p>
+  </div>
+  <div class="nse-header-right">
+    <div class="market-badge">
+      <div class="{'dot-open' if _mkt_open else 'dot-closed'}"></div>
+      <span>Market {'Open' if _mkt_open else 'Closed'}</span>
+    </div>
+    <div class="market-badge">🕐 {_mkt_time}</div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Sidebar filters ───────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🔍 Filters")
-
-    # Cap category
-    cap_filter = st.radio(
-        "Market Cap Category",
-        ["All", "Blue Chip", "Large Cap", "Mid Cap", "Small Cap"],
-        index=0,
-    )
-
-    st.markdown("---")
-
-    # Sector filter (populated after data load)
+    st.markdown("### FILTERS")
     sector_placeholder = st.empty()
 
-    st.markdown("---")
-    st.markdown("### 📊 Range Sliders")
+    st.markdown("### PRICE RANGE")
+    price_range = st.slider("Stock Price (₹)", 0, 50000, (0, 50000), step=100, label_visibility="collapsed")
+    st.caption("₹0 — ₹50,000")
 
-    price_range = st.slider(
-        "Stock Price (₹)",
-        min_value=0, max_value=50000,
-        value=(0, 50000), step=100,
-    )
+    st.markdown("### REVENUE (₹ Cr)")
+    rev_range = st.slider("Revenue", 0, 500000, (0, 500000), step=1000, label_visibility="collapsed")
+    st.caption("₹0 — ₹5L Cr")
 
-    rev_range = st.slider(
-        "Revenue (₹ Cr)",
-        min_value=0, max_value=500000,
-        value=(0, 500000), step=1000,
-    )
+    st.markdown("### MARKET CAP (₹ Cr)")
+    mktcap_range = st.slider("Market Cap", 0, 2000000, (0, 2000000), step=5000, label_visibility="collapsed")
+    st.caption("₹0 — ₹20L Cr")
 
-    mktcap_range = st.slider(
-        "Market Cap (₹ Cr)",
-        min_value=0, max_value=2000000,
-        value=(0, 2000000), step=5000,
-    )
+    st.markdown("### P/E RATIO")
+    pe_range = st.slider("P/E", 0.0, 200.0, (0.0, 200.0), step=1.0, label_visibility="collapsed")
+    st.caption("0 — 200")
 
-    pe_range = st.slider(
-        "P/E Ratio",
-        min_value=0.0, max_value=200.0,
-        value=(0.0, 200.0), step=1.0,
-    )
-
-    st.markdown("---")
-    st.markdown("### ⚙️ Display")
-    sort_col = st.selectbox(
-        "Sort by",
-        ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "Revenue (₹Cr)", "P/E", "EPS"],
-    )
-    sort_asc = st.checkbox("Ascending", value=False)
+    st.markdown("### DISPLAY")
+    sort_col = st.selectbox("Sort by", ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "Revenue (₹Cr)", "P/E", "EPS"])
+    c_sort1, c_sort2 = st.columns(2)
+    sort_asc = c_sort1.checkbox("Ascending", value=False)
     max_rows  = st.slider("Max rows", 10, 500, 50, step=10)
 
     st.markdown("---")
-    refresh = st.button("🔄 Refresh Data", use_container_width=True)
-    if refresh:
+    if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
+        st.rerun()
+
+# ── Cap filter pills (top of page) ────────────────────────────────────────────
+_CAP_OPTS = ["All", "Blue Chip", "Large Cap", "Mid Cap", "Small Cap"]
+_CAP_ICONS = {"All":"🌐","Blue Chip":"🔵","Large Cap":"🟢","Mid Cap":"🟡","Small Cap":"🔴"}
+
+st.markdown('<div class="cap-bar">'
+            '<span class="cap-label">Cap</span>', unsafe_allow_html=True)
+_cap_cols = st.columns(len(_CAP_OPTS))
+for _i, _cap in enumerate(_CAP_OPTS):
+    with _cap_cols[_i]:
+        _label = f"{_CAP_ICONS[_cap]} {_cap}"
+        if st.button(_label, use_container_width=True,
+                     type="primary" if st.session_state["cap_filter"] == _cap else "secondary",
+                     key=f"cap_{_cap}"):
+            st.session_state["cap_filter"] = _cap
+            st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
+
+cap_filter = st.session_state["cap_filter"]
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 symbols = get_all_symbols(cap_filter)
@@ -170,31 +361,57 @@ filtered = df[mask].copy()
 # Sort
 filtered = filtered.sort_values(sort_col, ascending=sort_asc).head(max_rows)
 
-# ── Summary metrics row ───────────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
-with c1:
-    st.metric("Stocks shown", len(filtered), f"of {len(df)}")
-with c2:
-    avg_pe = filtered["P/E"].replace(0, pd.NA).mean()
-    st.metric("Avg P/E", f"{avg_pe:.1f}" if pd.notna(avg_pe) else "—")
-with c3:
-    gainers = (filtered["Change %"] > 0).sum()
-    st.metric("Gainers", gainers, f"{gainers/len(filtered)*100:.0f}%" if len(filtered) else "—")
-with c4:
-    losers = (filtered["Change %"] < 0).sum()
-    st.metric("Losers", losers)
-with c5:
-    total_mcap = filtered["Mkt Cap (₹Cr)"].sum()
-    st.metric("Total Mkt Cap", f"₹{total_mcap/1e5:.1f}L Cr" if total_mcap else "—")
+# ── Stats bar ─────────────────────────────────────────────────────────────────
+_gainers   = int((filtered["Change %"] > 0).sum())
+_losers    = int((filtered["Change %"] < 0).sum())
+_flat      = len(filtered) - _gainers - _losers
+_avg_pe    = filtered["P/E"].replace(0, pd.NA).mean()
+_total_mc  = filtered["Mkt Cap (₹Cr)"].sum()
+_avg_chg   = filtered["Change %"].mean()
+_chg_col   = "sc-green" if _avg_chg >= 0 else "sc-red"
 
-st.markdown("---")
+st.markdown(f"""
+<div class="stats-bar">
+  <div class="stat-chip card-accent-blue">
+    <div class="sc-label">Stocks</div>
+    <div class="sc-value sc-blue">{len(filtered)}</div>
+    <div class="sc-sub">of {len(df)} loaded</div>
+  </div>
+  <div class="stat-chip card-accent-green">
+    <div class="sc-label">Gainers</div>
+    <div class="sc-value sc-green">{_gainers}</div>
+    <div class="sc-sub">{_gainers/len(filtered)*100:.0f}% of shown</div>
+  </div>
+  <div class="stat-chip card-accent-red">
+    <div class="sc-label">Losers</div>
+    <div class="sc-value sc-red">{_losers}</div>
+    <div class="sc-sub">{_flat} flat</div>
+  </div>
+  <div class="stat-chip card-accent-amber">
+    <div class="sc-label">Avg P/E</div>
+    <div class="sc-value sc-amber">{f"{_avg_pe:.1f}" if pd.notna(_avg_pe) else "—"}</div>
+    <div class="sc-sub">market valuation</div>
+  </div>
+  <div class="stat-chip">
+    <div class="sc-label">Avg Change</div>
+    <div class="sc-value {_chg_col}">{_avg_chg:+.2f}%</div>
+    <div class="sc-sub">today</div>
+  </div>
+  <div class="stat-chip">
+    <div class="sc-label">Total Mkt Cap</div>
+    <div class="sc-value">₹{_total_mc/1e5:.1f}L Cr</div>
+    <div class="sc-sub">combined</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ── Main tabs ─────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "⚖️ Compare", "📰 News & Sentiment", "🔍 Deep Search", "🗂️ Heatmap"])
 
 # ── TAB 1: Screener table ─────────────────────────────────────────────────────
 with tab1:
-    st.markdown(f"#### Showing {len(filtered)} stocks · sorted by {sort_col}")
+    st.markdown(f'<div class="section-hd">Showing {len(filtered)} stocks · sorted by {sort_col} · {cap_filter}</div>',
+                unsafe_allow_html=True)
 
     display_cols = [
         "Symbol", "Name", "Cap Category", "Sector",
@@ -212,10 +429,10 @@ with tab1:
 
     def color_cap(val):
         colors = {
-            "Blue Chip": "background-color: #1e3a5f; color: #93c5fd",
-            "Large Cap": "background-color: #1e3a2e; color: #86efac",
-            "Mid Cap":   "background-color: #3b2d1f; color: #fcd34d",
-            "Small Cap": "background-color: #3b1f1f; color: #fca5a5",
+            "Blue Chip": "background-color: rgba(59,130,246,.12); color: #60a5fa",
+            "Large Cap": "background-color: rgba(16,185,129,.12); color: #34d399",
+            "Mid Cap":   "background-color: rgba(245,158,11,.12); color: #fbbf24",
+            "Small Cap": "background-color: rgba(239,68,68,.12);  color: #f87171",
         }
         return colors.get(val, "")
 
@@ -278,8 +495,8 @@ with tab2:
 
             fig.update_layout(
                 template="plotly_dark",
-                paper_bgcolor="#0f172a",
-                plot_bgcolor="#0f172a",
+                paper_bgcolor="#07111d",
+                plot_bgcolor="#07111d",
                 height=480,
                 margin=dict(l=0, r=0, t=30, b=0),
                 title=f"{chart_sym} · {chart_period}",
@@ -294,8 +511,8 @@ with tab2:
                 marker_color="#3b82f6", name="Volume"
             ))
             fig2.update_layout(
-                template="plotly_dark", paper_bgcolor="#0f172a",
-                plot_bgcolor="#0f172a", height=150,
+                template="plotly_dark", paper_bgcolor="#07111d",
+                plot_bgcolor="#07111d", height=150,
                 margin=dict(l=0, r=0, t=10, b=0),
                 showlegend=False,
             )
@@ -376,8 +593,8 @@ with tab3:
 
             fig_ai.update_layout(
                 template="plotly_dark",
-                paper_bgcolor="#0f172a",
-                plot_bgcolor="#0f172a",
+                paper_bgcolor="#07111d",
+                plot_bgcolor="#07111d",
                 height=420,
                 margin=dict(l=0, r=0, t=30, b=0),
                 xaxis_rangeslider_visible=False,
@@ -398,14 +615,14 @@ with tab3:
             sig = "HOLD"
             if "BUY"  in analysis.upper()[:30]: sig = "BUY"
             if "SELL" in analysis.upper()[:30]: sig = "SELL"
-            badge_cls = {"BUY":"badge-buy","SELL":"badge-sell","HOLD":"badge-hold"}[sig]
+            badge_cls = {"BUY":"badge badge-buy","SELL":"badge badge-sell","HOLD":"badge badge-hold"}[sig]
 
             # Signal + news sentiment pill side by side
             news_label = news_ctx.get("label", "")
             news_score = news_ctx.get("overall", 0)
             news_count = news_ctx.get("count", 0)
-            news_color = {"Positive":"#166534","Negative":"#7f1d1d","Neutral":"#1e3a5f"}.get(news_label, "#1e3a5f")
-            news_txt_color = {"Positive":"#bbf7d0","Negative":"#fecaca","Neutral":"#bfdbfe"}.get(news_label, "#bfdbfe")
+            news_color = {"Positive":"var(--green)","Negative":"var(--red)","Neutral":"var(--blue)"}.get(news_label, "var(--blue)")
+            news_bg    = {"Positive":"rgba(16,185,129,.12)","Negative":"rgba(239,68,68,.12)","Neutral":"rgba(59,130,246,.12)"}.get(news_label, "rgba(59,130,246,.12)")
 
             col_sig, col_news = st.columns([1, 2])
             with col_sig:
@@ -413,9 +630,10 @@ with tab3:
             with col_news:
                 if news_count:
                     st.markdown(
-                        f'<span style="background:{news_color};color:{news_txt_color};'
-                        f'padding:3px 10px;border-radius:20px;font-size:0.8rem;font-weight:600">'
-                        f'News: {news_label} ({news_score:+.2f}) · {news_count} articles</span>',
+                        f'<span style="background:{news_bg};color:{news_color};'
+                        f'padding:3px 12px;border-radius:20px;font-size:0.75rem;font-weight:600;'
+                        f'border:1px solid {news_color}44">'
+                        f'📰 News: {news_label} {news_score:+.2f} · {news_count} articles</span>',
                         unsafe_allow_html=True,
                     )
             st.markdown("")
@@ -477,25 +695,18 @@ with tab4:
                 chg_color = "#22c55e" if r["Change %"] >= 0 else "#ef4444"
                 with cols[i]:
                     st.markdown(f"""
-                    <div style="background:#1e293b;border-radius:10px;padding:12px;
-                                border-top:3px solid #3b82f6;text-align:center">
-                        <div style="font-size:1.1rem;font-weight:700;color:#f1f5f9">{sym}</div>
-                        <div style="font-size:0.75rem;color:#64748b;margin-bottom:6px">
-                            {r['Cap Category']} · {r['Sector']}
-                        </div>
-                        <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9">₹{r['Price (₹)']:,.2f}</div>
-                        <div style="color:{chg_color};font-size:0.85rem;font-weight:600">
+                    <div class="cmp-card">
+                        <div class="cmp-sym">{sym}</div>
+                        <div class="cmp-cat">{r['Cap Category']} · {r['Sector']}</div>
+                        <div class="cmp-price">₹{r['Price (₹)']:,.2f}</div>
+                        <div style="color:{chg_color};font-size:0.82rem;font-weight:700">
                             {r['Change %']:+.2f}%
                         </div>
-                        <hr style="border-color:#334155;margin:8px 0">
-                        <div style="font-size:0.8rem;color:#94a3b8">
-                            P/E <b style="color:#f1f5f9">{r['P/E']:.1f}</b> &nbsp;|&nbsp;
-                            P/B <b style="color:#f1f5f9">{r['P/B']:.2f}</b><br>
-                            EPS <b style="color:#f1f5f9">₹{r['EPS']:.2f}</b><br>
-                            Rev <b style="color:#f1f5f9">₹{r['Revenue (₹Cr)']:,.0f}Cr</b><br>
-                            Div <b style="color:#f1f5f9">{r['Div Yield %']:.2f}%</b> &nbsp;|&nbsp;
-                            β <b style="color:#f1f5f9">{r['Beta']:.2f}</b>
-                        </div>
+                        <hr>
+                        <div class="cmp-row">P/E <b>{r['P/E']:.1f}</b> &nbsp;·&nbsp; P/B <b>{r['P/B']:.2f}</b></div>
+                        <div class="cmp-row">EPS <b>₹{r['EPS']:.2f}</b></div>
+                        <div class="cmp-row">Rev <b>₹{r['Revenue (₹Cr)']:,.0f} Cr</b></div>
+                        <div class="cmp-row">Div <b>{r['Div Yield %']:.2f}%</b> &nbsp;·&nbsp; β <b>{r['Beta']:.2f}</b></div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -554,7 +765,7 @@ with tab4:
                     angularaxis=dict(gridcolor="#334155", tickfont=dict(color="#94a3b8")),
                     bgcolor="#0f172a",
                 ),
-                paper_bgcolor="#0f172a",
+                paper_bgcolor="#07111d",
                 template="plotly_dark",
                 height=380,
                 margin=dict(l=40, r=40, t=40, b=20),
@@ -670,7 +881,7 @@ with tab5:
                         textinfo="label+percent",
                     ))
                     donut.update_layout(
-                        template="plotly_dark", paper_bgcolor="#0f172a",
+                        template="plotly_dark", paper_bgcolor="#07111d",
                         height=230, margin=dict(l=0, r=0, t=10, b=0),
                         showlegend=False,
                         title=dict(text="Sentiment split", font=dict(color="#94a3b8", size=12)),
@@ -690,8 +901,8 @@ with tab5:
                             marker_color=src_counts["color"],
                         ))
                         fig_src.update_layout(
-                            template="plotly_dark", paper_bgcolor="#0f172a",
-                            plot_bgcolor="#0f172a", height=230,
+                            template="plotly_dark", paper_bgcolor="#07111d",
+                            plot_bgcolor="#07111d", height=230,
                             margin=dict(l=0, r=0, t=10, b=0),
                             title=dict(text="Articles by source", font=dict(color="#94a3b8", size=12)),
                             xaxis=dict(tickangle=-30, tickfont=dict(color="#94a3b8", size=10)),
@@ -711,8 +922,8 @@ with tab5:
                         marker_color=emo_counts["color"],
                     ))
                     fig_emo.update_layout(
-                        template="plotly_dark", paper_bgcolor="#0f172a",
-                        plot_bgcolor="#0f172a", height=200,
+                        template="plotly_dark", paper_bgcolor="#07111d",
+                        plot_bgcolor="#07111d", height=200,
                         margin=dict(l=0, r=0, t=10, b=0),
                         title=dict(text="Emotion distribution", font=dict(color="#94a3b8", size=12)),
                         xaxis=dict(tickfont=dict(color="#94a3b8")),
@@ -788,8 +999,8 @@ with tab5:
                 ))
                 fig_mkt.update_layout(
                     barmode="stack",
-                    template="plotly_dark", paper_bgcolor="#0f172a",
-                    plot_bgcolor="#0f172a", height=420,
+                    template="plotly_dark", paper_bgcolor="#07111d",
+                    plot_bgcolor="#07111d", height=420,
                     margin=dict(l=0, r=0, t=30, b=0),
                     title=dict(text="Market Sentiment by Stock (sorted by net positive)",
                                font=dict(color="#94a3b8")),
@@ -808,8 +1019,8 @@ with tab5:
                     marker_color=src_agg["color"],
                 ))
                 fig_src2.update_layout(
-                    template="plotly_dark", paper_bgcolor="#0f172a",
-                    plot_bgcolor="#0f172a", height=220,
+                    template="plotly_dark", paper_bgcolor="#07111d",
+                    plot_bgcolor="#07111d", height=220,
                     margin=dict(l=0, r=0, t=30, b=0),
                     title=dict(text="Articles by Source", font=dict(color="#94a3b8")),
                     xaxis=dict(tickfont=dict(color="#94a3b8")),
@@ -936,8 +1147,8 @@ with tab6:
                                 vals  = sales_row.iloc[0][years].astype(str).str.replace(",", "").replace("—", "0")
                                 fig_rev = go.Figure(go.Bar(x=years, y=pd.to_numeric(vals, errors="coerce"),
                                                            marker_color="#3b82f6", name="Revenue"))
-                                fig_rev.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
-                                                      plot_bgcolor="#0f172a", height=260,
+                                fig_rev.update_layout(template="plotly_dark", paper_bgcolor="#07111d",
+                                                      plot_bgcolor="#07111d", height=260,
                                                       margin=dict(l=0, r=0, t=20, b=0),
                                                       title="Revenue trend (₹ Cr)")
                                 st.plotly_chart(fig_rev, use_container_width=True)
@@ -980,7 +1191,7 @@ with tab6:
                                     hovertemplate="<b>%{label}</b><br>%{value:.2f}%<extra></extra>",
                                 ))
                                 fig_sh.update_layout(
-                                    template="plotly_dark", paper_bgcolor="#0f172a",
+                                    template="plotly_dark", paper_bgcolor="#07111d",
                                     height=340, margin=dict(l=0, r=0, t=30, b=0),
                                     legend=dict(orientation="h", y=-0.1, font=dict(size=11)),
                                     title=dict(text=f"Shareholding — {latest_col}", font=dict(color="#94a3b8")),
@@ -1028,7 +1239,7 @@ with tab6:
                     fig_ds.add_hline(y=30, line_dash="dash", line_color="#22c55e", line_width=1, row=2, col=1)
 
                     fig_ds.update_layout(
-                        template="plotly_dark", paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        template="plotly_dark", paper_bgcolor="#07111d", plot_bgcolor="#07111d",
                         height=460, margin=dict(l=0, r=0, t=10, b=0),
                         xaxis_rangeslider_visible=False,
                         legend=dict(orientation="h", y=1.04, font=dict(size=11)),
@@ -1218,7 +1429,7 @@ with tab7:
 <meta charset="utf-8">
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <style>
-  body {{ margin:0; padding:0; background:#0f172a; overflow:hidden; }}
+  body {{ margin:0; padding:0; background:#07111d; overflow:hidden; }}
   #chart {{ width:100%; height:610px; }}
 </style>
 </head>
@@ -1229,7 +1440,7 @@ var chart = echarts.init(document.getElementById('chart'), 'dark', {{renderer:'c
 var treeData = {tree_json};
 
 var option = {{
-  backgroundColor: '#0f172a',
+  backgroundColor: '#07111d',
   tooltip: {{
     trigger: 'item',
     backgroundColor: '#1e293b',
@@ -1361,9 +1572,13 @@ window.addEventListener('resize', function() {{ chart.resize(); }});
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;color:#475569;font-size:0.8rem'>"
-    "Data via Yahoo Finance (NSE) · AI via Groq llama3-70b · "
-    "Not financial advice"
+    "<div style='text-align:center;color:#334155;font-size:0.72rem;padding:12px 0;"
+    "border-top:1px solid #0d1e30;margin-top:8px'>"
+    "📊 Data: Yahoo Finance (NSE, ~15min delay) &nbsp;·&nbsp; "
+    "🤖 AI: Groq llama-3.3-70b &nbsp;·&nbsp; "
+    "📰 News: Groww · Google News · ET · Moneycontrol &nbsp;·&nbsp; "
+    "🔍 Financials: Screener.in &nbsp;·&nbsp; "
+    "<b style='color:#1e3a5f'>Not financial advice</b>"
     "</div>",
     unsafe_allow_html=True,
 )
