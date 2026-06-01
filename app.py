@@ -20,7 +20,7 @@ from data_fetcher import (
 from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
 from news_fetcher import get_news_summary, fetch_all_news, score_market_news
 from screener_search import search_screener, fetch_company_data, fetch_bse_announcements, get_bse_code
-from data_fetcher import fetch_single_stock
+from data_fetcher import fetch_single_stock, fetch_history
 
 load_dotenv()
 
@@ -988,6 +988,56 @@ with tab6:
                                 st.plotly_chart(fig_sh, use_container_width=True)
                         except Exception:
                             pass
+
+                # ── Price chart ───────────────────────────────────────────
+                st.markdown("---")
+                st.markdown("**📈 Price Chart**")
+                ds_period = st.radio("Period", ["1mo","3mo","6mo","1y","2y"], index=2,
+                                     horizontal=True, key="ds_period")
+                with st.spinner(f"Loading {symbol_guess} chart…"):
+                    ds_hist = fetch_history(symbol_guess, ds_period)
+
+                if not ds_hist.empty:
+                    ds_hist["SMA20"] = ds_hist["Close"].rolling(20).mean()
+                    ds_hist["SMA50"] = ds_hist["Close"].rolling(50).mean()
+                    delta = ds_hist["Close"].diff()
+                    gain  = delta.where(delta > 0, 0).rolling(14).mean()
+                    loss  = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                    ds_hist["RSI"] = 100 - (100 / (1 + gain / loss.replace(0, float("nan"))))
+
+                    from plotly.subplots import make_subplots as _msp
+                    fig_ds = _msp(rows=2, cols=1, shared_xaxes=True,
+                                  row_heights=[0.7, 0.3], vertical_spacing=0.04)
+
+                    fig_ds.add_trace(go.Candlestick(
+                        x=ds_hist.index,
+                        open=ds_hist["Open"], high=ds_hist["High"],
+                        low=ds_hist["Low"],   close=ds_hist["Close"],
+                        name=symbol_guess,
+                        increasing_line_color="#22c55e",
+                        decreasing_line_color="#ef4444",
+                    ), row=1, col=1)
+                    fig_ds.add_trace(go.Scatter(x=ds_hist.index, y=ds_hist["SMA20"],
+                        name="SMA 20", line=dict(color="#60a5fa", width=1.5)), row=1, col=1)
+                    fig_ds.add_trace(go.Scatter(x=ds_hist.index, y=ds_hist["SMA50"],
+                        name="SMA 50", line=dict(color="#f59e0b", width=1.5)), row=1, col=1)
+                    fig_ds.add_trace(go.Scatter(x=ds_hist.index, y=ds_hist["RSI"],
+                        name="RSI", line=dict(color="#a78bfa", width=1.5),
+                        fill="tozeroy", fillcolor="rgba(167,139,250,0.1)"), row=2, col=1)
+                    fig_ds.add_hline(y=70, line_dash="dash", line_color="#ef4444", line_width=1, row=2, col=1)
+                    fig_ds.add_hline(y=30, line_dash="dash", line_color="#22c55e", line_width=1, row=2, col=1)
+
+                    fig_ds.update_layout(
+                        template="plotly_dark", paper_bgcolor="#0f172a", plot_bgcolor="#0f172a",
+                        height=460, margin=dict(l=0, r=0, t=10, b=0),
+                        xaxis_rangeslider_visible=False,
+                        legend=dict(orientation="h", y=1.04, font=dict(size=11)),
+                    )
+                    fig_ds.update_yaxes(title_text="Price (₹)", row=1, col=1)
+                    fig_ds.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100])
+                    st.plotly_chart(fig_ds, use_container_width=True)
+                else:
+                    st.info(f"No price history available for {symbol_guess} on NSE.")
 
                 # ── Live stock data from yfinance ─────────────────────────
                 st.markdown("---")
