@@ -20,6 +20,7 @@ from data_fetcher import (
 from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
 from news_fetcher import get_news_summary, fetch_all_news, score_market_news
 from screener_search import search_screener, fetch_company_data, fetch_bse_announcements, get_bse_code
+from data_fetcher import fetch_single_stock
 
 load_dotenv()
 
@@ -948,26 +949,108 @@ with tab6:
                 with ft6:
                     sh = data.get("shareholding", pd.DataFrame())
                     _show_table(sh)
-                    # Shareholding pie for latest period
+                    # Shareholding pie — exclude count rows, keep % rows only
                     if not sh.empty:
                         try:
                             latest_col = sh.columns[-1]
-                            labels = sh.iloc[:, 0].astype(str).tolist()
-                            vals   = pd.to_numeric(sh[latest_col].astype(str).str.replace("%","").str.replace(",",""),
-                                                   errors="coerce").fillna(0).tolist()
-                            if any(v > 0 for v in vals):
+                            _EXCLUDE = r"shareholders|no\.\s*of|number of"
+                            _INCLUDE = r"promoter|dii|fii|public|govern|mutual|insurance|other"
+                            sh_pie = sh[
+                                sh.iloc[:, 0].astype(str).str.lower().str.contains(_INCLUDE, na=False) |
+                                (
+                                    ~sh.iloc[:, 0].astype(str).str.lower().str.contains(_EXCLUDE, na=False) &
+                                    sh.iloc[:, 0].astype(str).str.lower().str.contains(r"[a-z]", na=False)
+                                )
+                            ]
+                            # Also drop rows where value looks like a raw count (> 200)
+                            sh_pie = sh_pie.copy()
+                            sh_pie["_val"] = pd.to_numeric(
+                                sh_pie[latest_col].astype(str).str.replace("%","").str.replace(",",""),
+                                errors="coerce"
+                            )
+                            sh_pie = sh_pie[(sh_pie["_val"] > 0) & (sh_pie["_val"] <= 100)]
+                            labels = sh_pie.iloc[:, 0].astype(str).tolist()
+                            vals   = sh_pie["_val"].tolist()
+
+                            if labels and any(v > 0 for v in vals):
                                 fig_sh = go.Figure(go.Pie(
-                                    labels=labels, values=vals, hole=0.45,
+                                    labels=labels, values=vals, hole=0.5,
                                     marker_colors=["#3b82f6","#22c55e","#f59e0b","#ef4444","#a78bfa","#06b6d4"],
                                     textinfo="label+percent",
+                                    hovertemplate="<b>%{label}</b><br>%{value:.2f}%<extra></extra>",
                                 ))
-                                fig_sh.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
-                                                     height=300, margin=dict(l=0,r=0,t=10,b=0),
-                                                     showlegend=False,
-                                                     title=f"Shareholding — {latest_col}")
+                                fig_sh.update_layout(
+                                    template="plotly_dark", paper_bgcolor="#0f172a",
+                                    height=340, margin=dict(l=0, r=0, t=30, b=0),
+                                    legend=dict(orientation="h", y=-0.1, font=dict(size=11)),
+                                    title=dict(text=f"Shareholding — {latest_col}", font=dict(color="#94a3b8")),
+                                )
                                 st.plotly_chart(fig_sh, use_container_width=True)
                         except Exception:
                             pass
+
+                # ── Live stock data from yfinance ─────────────────────────
+                st.markdown("---")
+                st.markdown("**📡 Live Market Data (NSE)**")
+                with st.spinner(f"Fetching live data for {symbol_guess}…"):
+                    live = fetch_single_stock(symbol_guess)
+                if live:
+                    lc1, lc2, lc3, lc4 = st.columns(4)
+                    lc1.metric("Price",    f"₹{live['Price (₹)']:,.2f}", f"{live['Change %']:+.2f}%")
+                    lc2.metric("Mkt Cap",  f"₹{live['Mkt Cap (₹Cr)']:,.0f} Cr")
+                    lc3.metric("P/E",      f"{live['P/E']:.1f}")
+                    lc4.metric("Revenue",  f"₹{live['Revenue (₹Cr)']:,.0f} Cr")
+                    lc5, lc6, lc7, lc8 = st.columns(4)
+                    lc5.metric("P/B",      f"{live['P/B']:.2f}")
+                    lc6.metric("EPS",      f"₹{live['EPS']:.2f}")
+                    lc7.metric("Div Yield",f"{live['Div Yield %']:.2f}%")
+                    lc8.metric("Beta",     f"{live['Beta']:.2f}")
+                else:
+                    st.info(f"{symbol_guess} not found in yfinance — may not be in NSE universe.")
+
+                # ── News sentiment ────────────────────────────────────────
+                st.markdown("---")
+                st.markdown("**📰 News Sentiment**")
+                with st.spinner(f"Fetching & scoring news for {symbol_guess}…"):
+                    ns = get_news_summary(symbol_guess, data.get("name", ""))
+
+                if ns["count"] == 0:
+                    st.info("No recent news found for this stock.")
+                else:
+                    ov_color = "#22c55e" if ns["overall"] > 0.15 else ("#ef4444" if ns["overall"] < -0.15 else "#3b82f6")
+                    st.markdown(
+                        f"<div style='background:#1e293b;border-radius:8px;padding:10px 16px;"
+                        f"border-left:3px solid {ov_color};margin-bottom:10px'>"
+                        f"<span style='font-weight:700;color:{ov_color}'>{ns['label']}</span>"
+                        f"<span style='color:#94a3b8;font-size:0.85rem;margin-left:8px'>"
+                        f"score {ns['overall']:+.3f} · {ns['count']} articles · "
+                        f"✅ {ns['positive']} positive · ❌ {ns['negative']} negative</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    arts = ns["articles"]
+                    _SB  = {
+                        "positive": '<span style="background:#166534;color:#bbf7d0;padding:1px 7px;border-radius:10px;font-size:0.72rem;font-weight:600">POS</span>',
+                        "negative": '<span style="background:#7f1d1d;color:#fecaca;padding:1px 7px;border-radius:10px;font-size:0.72rem;font-weight:600">NEG</span>',
+                        "neutral":  '<span style="background:#1e3a5f;color:#bfdbfe;padding:1px 7px;border-radius:10px;font-size:0.72rem;font-weight:600">NEU</span>',
+                    }
+                    _SC  = {"Groww":"#f59e0b","Google News":"#3b82f6","Economic Times":"#ef4444",
+                            "Moneycontrol":"#8b5cf6","Business Standard":"#06b6d4","LiveMint":"#22c55e"}
+                    for _, row_a in arts.head(8).iterrows():
+                        badge = _SB.get(row_a.get("sentiment","neutral"), _SB["neutral"])
+                        src   = row_a.get("source","")
+                        sc    = _SC.get(src, "#64748b")
+                        url   = row_a.get("url","")
+                        title = row_a.get("title","")[:200]
+                        t_html = (f'<a href="{url}" target="_blank" style="color:#e2e8f0;text-decoration:none">{title}</a>'
+                                  if url else f'<span style="color:#e2e8f0">{title}</span>')
+                        st.markdown(
+                            f"<div style='background:#1e293b;border-radius:7px;padding:8px 12px;margin-bottom:5px'>"
+                            f"{badge} <span style='background:{sc}22;color:{sc};padding:1px 6px;"
+                            f"border-radius:8px;font-size:0.71rem;border:1px solid {sc}44'>{src}</span> "
+                            f"<span style='color:#64748b;font-size:0.76rem'>{row_a.get('date','')}</span><br>"
+                            f"<span style='font-size:0.86rem'>{t_html}</span></div>",
+                            unsafe_allow_html=True,
+                        )
 
         if load_ann and symbol_guess:
             with st.spinner(f"Fetching BSE announcements for {symbol_guess}…"):
@@ -989,7 +1072,7 @@ with tab6:
                                 unsafe_allow_html=True,
                             )
                 else:
-                    st.warning(f"Could not find BSE code for {symbol_guess}. Try loading the Angel Broking token map first.")
+                    st.warning(f"Could not find BSE code for {symbol_guess}.")
 
         if not load_btn and not load_ann:
             st.markdown(

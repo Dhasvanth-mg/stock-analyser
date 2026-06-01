@@ -135,11 +135,36 @@ def fetch_company_data(screener_url: str) -> dict:
     sh_sec = soup.find("section", {"id": "shareholding"})
     result["shareholding"] = _parse_table(sh_sec)
 
-    # ── Pros & Cons ───────────────────────────────────────────────────────
-    pros_el = soup.select("div.pros li")
-    cons_el = soup.select("div.cons li")
-    result["pros"] = [li.get_text(strip=True) for li in pros_el]
-    result["cons"] = [li.get_text(strip=True) for li in cons_el]
+    # ── Pros & Cons — try multiple selector patterns ──────────────────────
+    def _get_list(selectors):
+        for sel in selectors:
+            items = soup.select(sel)
+            if items:
+                return [li.get_text(strip=True) for li in items if li.get_text(strip=True)]
+        return []
+
+    result["pros"] = _get_list([
+        "div.pros li", "#analysis .pros li", "section#analysis div:first-child li",
+        ".strengths li", ".positive li", "[class*='pro'] li",
+    ])
+    result["cons"] = _get_list([
+        "div.cons li", "#analysis .cons li", "section#analysis div:last-child li",
+        ".weaknesses li", ".negative li", "[class*='con'] li",
+    ])
+
+    # Last resort: grab both lists from #analysis and split at midpoint
+    if not result["pros"] and not result["cons"]:
+        analysis = soup.find(id="analysis") or soup.find("section", {"id": "analysis"})
+        if analysis:
+            all_lists = analysis.find_all("ul")
+            if len(all_lists) >= 2:
+                result["pros"] = [li.get_text(strip=True) for li in all_lists[0].find_all("li")]
+                result["cons"] = [li.get_text(strip=True) for li in all_lists[1].find_all("li")]
+            elif len(all_lists) == 1:
+                items = [li.get_text(strip=True) for li in all_lists[0].find_all("li")]
+                mid = len(items) // 2
+                result["pros"] = items[:mid]
+                result["cons"] = items[mid:]
 
     return result
 

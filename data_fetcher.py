@@ -227,6 +227,13 @@ def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_single_stock(symbol: str) -> dict | None:
+    """Fetch yfinance data for one symbol — used by Deep Search."""
+    cap_labels, sector_map = load_universe()
+    return _fetch_one(symbol.upper(), cap_labels, sector_map)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
     try:
