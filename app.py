@@ -16,6 +16,7 @@ from data_fetcher import (
     get_all_symbols, load_universe,
 )
 from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
+from news_fetcher import get_news_summary, fetch_all_news
 
 load_dotenv()
 
@@ -184,7 +185,7 @@ with c5:
 st.markdown("---")
 
 # ── Main tabs ─────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "⚖️ Compare", "🗂️ Heatmap"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "⚖️ Compare", "📰 News & Sentiment", "🗂️ Heatmap"])
 
 # ── TAB 1: Screener table ─────────────────────────────────────────────────────
 with tab1:
@@ -384,8 +385,9 @@ with tab3:
 
         if run_ai:
             stock_row = filtered[filtered["Symbol"] == ai_sym].iloc[0].to_dict()
-            with st.spinner(f"Analysing {ai_sym} with Groq…"):
-                analysis = get_ai_analysis(stock_row)
+            with st.spinner(f"Fetching news & analysing {ai_sym} with Groq…"):
+                news_ctx  = get_news_summary(ai_sym)
+                analysis  = get_ai_analysis(stock_row, news_summary=news_ctx)
 
             # Extract signal for badge
             sig = "HOLD"
@@ -393,7 +395,24 @@ with tab3:
             if "SELL" in analysis.upper()[:30]: sig = "SELL"
             badge_cls = {"BUY":"badge-buy","SELL":"badge-sell","HOLD":"badge-hold"}[sig]
 
-            st.markdown(f'<span class="{badge_cls}">{sig}</span>', unsafe_allow_html=True)
+            # Signal + news sentiment pill side by side
+            news_label = news_ctx.get("label", "")
+            news_score = news_ctx.get("overall", 0)
+            news_count = news_ctx.get("count", 0)
+            news_color = {"Positive":"#166534","Negative":"#7f1d1d","Neutral":"#1e3a5f"}.get(news_label, "#1e3a5f")
+            news_txt_color = {"Positive":"#bbf7d0","Negative":"#fecaca","Neutral":"#bfdbfe"}.get(news_label, "#bfdbfe")
+
+            col_sig, col_news = st.columns([1, 2])
+            with col_sig:
+                st.markdown(f'<span class="{badge_cls}">{sig}</span>', unsafe_allow_html=True)
+            with col_news:
+                if news_count:
+                    st.markdown(
+                        f'<span style="background:{news_color};color:{news_txt_color};'
+                        f'padding:3px 10px;border-radius:20px;font-size:0.8rem;font-weight:600">'
+                        f'News: {news_label} ({news_score:+.2f}) · {news_count} articles</span>',
+                        unsafe_allow_html=True,
+                    )
             st.markdown("")
             st.info(analysis)
 
@@ -568,8 +587,134 @@ with tab4:
                 st.warning("Please select at least one investment priority.")
 
 
-# ── TAB 5: Heatmap ────────────────────────────────────────────────────────────
+# ── TAB 5: News & Sentiment ───────────────────────────────────────────────────
 with tab5:
+    st.markdown("#### 📰 News Sentiment — powered by Groww feed + Groq")
+
+    ns_left, ns_right = st.columns([1, 2])
+
+    with ns_left:
+        news_sym  = st.selectbox("Stock", filtered["Symbol"].tolist(), key="news_sym")
+        run_news  = st.button("🔍 Fetch & Analyse News", use_container_width=True, type="primary")
+        st.markdown("---")
+        st.markdown("**Market-wide sentiment**")
+        run_market = st.button("🌐 Scan All Recent News", use_container_width=True)
+
+    with ns_right:
+        if run_news:
+            with st.spinner(f"Fetching news for {news_sym}…"):
+                ns = get_news_summary(news_sym)
+
+            if ns["count"] == 0:
+                st.warning(f"No recent news found for **{news_sym}** in the Groww feed.")
+            else:
+                arts = ns["articles"]
+
+                # ── Sentiment summary row ─────────────────────────────────
+                ov_color = "#22c55e" if ns["overall"] > 0.15 else ("#ef4444" if ns["overall"] < -0.15 else "#3b82f6")
+                st.markdown(
+                    f"<div style='background:#1e293b;border-radius:10px;padding:14px 18px;"
+                    f"border-left:4px solid {ov_color};margin-bottom:12px'>"
+                    f"<span style='font-size:1.2rem;font-weight:700;color:{ov_color}'>"
+                    f"{ns['label']} Sentiment</span>"
+                    f"<span style='color:#94a3b8;font-size:0.9rem;margin-left:10px'>"
+                    f"score {ns['overall']:+.3f} · {ns['count']} articles</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+                sc1, sc2, sc3 = st.columns(3)
+                sc1.metric("Positive", ns["positive"], delta=None)
+                sc2.metric("Neutral",  ns["neutral"])
+                sc3.metric("Negative", ns["negative"])
+
+                # ── Sentiment donut ───────────────────────────────────────
+                donut = go.Figure(go.Pie(
+                    labels=["Positive", "Neutral", "Negative"],
+                    values=[ns["positive"], ns["neutral"], ns["negative"]],
+                    hole=0.55,
+                    marker_colors=["#22c55e", "#3b82f6", "#ef4444"],
+                    textinfo="label+percent",
+                ))
+                donut.update_layout(
+                    template="plotly_dark", paper_bgcolor="#0f172a",
+                    height=260, margin=dict(l=0, r=0, t=10, b=0),
+                    showlegend=False,
+                )
+                st.plotly_chart(donut, use_container_width=True)
+
+                # ── Emotion bar ───────────────────────────────────────────
+                if "emotion" in arts.columns:
+                    emo_counts = arts["emotion"].value_counts().reset_index()
+                    emo_counts.columns = ["Emotion", "Count"]
+                    emotion_colors = {
+                        "optimism":"#22c55e","greed":"#f59e0b","confidence":"#3b82f6",
+                        "fear":"#ef4444","panic":"#dc2626","uncertainty":"#94a3b8",
+                    }
+                    emo_counts["color"] = emo_counts["Emotion"].map(
+                        lambda e: emotion_colors.get(e, "#64748b")
+                    )
+                    fig_emo = go.Figure(go.Bar(
+                        x=emo_counts["Emotion"], y=emo_counts["Count"],
+                        marker_color=emo_counts["color"],
+                    ))
+                    fig_emo.update_layout(
+                        template="plotly_dark", paper_bgcolor="#0f172a",
+                        plot_bgcolor="#0f172a", height=220,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        title=dict(text="Emotion Distribution", font=dict(color="#94a3b8", size=13)),
+                        xaxis=dict(tickfont=dict(color="#94a3b8")),
+                        yaxis=dict(tickfont=dict(color="#94a3b8")),
+                    )
+                    st.plotly_chart(fig_emo, use_container_width=True)
+
+                # ── Article list ──────────────────────────────────────────
+                st.markdown("**Recent articles**")
+                sent_badge = {
+                    "positive": ('<span style="background:#166534;color:#bbf7d0;padding:2px 8px;'
+                                 'border-radius:12px;font-size:0.75rem;font-weight:600">POSITIVE</span>'),
+                    "negative": ('<span style="background:#7f1d1d;color:#fecaca;padding:2px 8px;'
+                                 'border-radius:12px;font-size:0.75rem;font-weight:600">NEGATIVE</span>'),
+                    "neutral":  ('<span style="background:#1e3a5f;color:#bfdbfe;padding:2px 8px;'
+                                 'border-radius:12px;font-size:0.75rem;font-weight:600">NEUTRAL</span>'),
+                }
+                for _, row_a in arts.iterrows():
+                    badge = sent_badge.get(row_a.get("sentiment","neutral"), sent_badge["neutral"])
+                    st.markdown(
+                        f"<div style='background:#1e293b;border-radius:8px;padding:10px 14px;"
+                        f"margin-bottom:6px'>"
+                        f"{badge} &nbsp;"
+                        f"<span style='color:#64748b;font-size:0.78rem'>{row_a.get('date','')} · "
+                        f"{row_a.get('emotion','').capitalize()}</span><br>"
+                        f"<span style='color:#e2e8f0;font-size:0.88rem'>{row_a.get('title','')[:200]}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+        if run_market:
+            with st.spinner("Fetching market-wide news (this may take ~30s)…"):
+                all_news = fetch_all_news(pages=5)
+
+            if all_news.empty:
+                st.warning("Could not reach Groww news feed.")
+            else:
+                top_stocks = all_news["ticker"].value_counts().head(20).reset_index()
+                top_stocks.columns = ["Stock", "Articles"]
+                fig_top = go.Figure(go.Bar(
+                    x=top_stocks["Stock"], y=top_stocks["Articles"],
+                    marker_color="#3b82f6",
+                ))
+                fig_top.update_layout(
+                    template="plotly_dark", paper_bgcolor="#0f172a",
+                    plot_bgcolor="#0f172a", height=300,
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    title=dict(text="Most Covered Stocks in Recent News", font=dict(color="#94a3b8")),
+                )
+                st.plotly_chart(fig_top, use_container_width=True)
+                st.caption(f"{len(all_news)} articles fetched · {all_news['ticker'].nunique()} unique stocks mentioned")
+
+
+# ── TAB 6: Heatmap ────────────────────────────────────────────────────────────
+with tab6:
     st.markdown("#### Market Cap Heatmap by Sector")
 
     hm_data = filtered[filtered["Mkt Cap (₹Cr)"] > 0].copy()

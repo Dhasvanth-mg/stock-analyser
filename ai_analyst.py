@@ -20,14 +20,32 @@ def _get_client():
     return _client
 
 
-def get_ai_analysis(row: dict) -> str:
+def get_ai_analysis(row: dict, news_summary: dict | None = None) -> str:
     """
     Given a stock's metrics dict, return a short AI analysis + signal.
-    Returns plain text: signal line + 2-3 sentence reasoning.
+    Optionally includes news sentiment context.
     """
+    news_block = ""
+    if news_summary and news_summary.get("count", 0) > 0:
+        arts = news_summary.get("articles")
+        recent_heads = ""
+        if arts is not None and not arts.empty:
+            top = arts.head(5)
+            recent_heads = "\n".join(
+                f"  • [{r['sentiment'].upper()}] {r['title'][:120]}"
+                for _, r in top.iterrows()
+            )
+        news_block = f"""
+Recent News Sentiment ({news_summary['count']} articles):
+Overall: {news_summary['label']} (score: {news_summary['overall']:+.2f})
+Positive: {news_summary['positive']} | Neutral: {news_summary['neutral']} | Negative: {news_summary['negative']}
+Top headlines:
+{recent_heads}
+"""
+
     prompt = f"""You are a concise Indian stock market analyst. Analyse this NSE stock and give:
 1. Signal: BUY / HOLD / SELL
-2. 2–3 sentence reasoning based on the metrics.
+2. 3–4 sentence reasoning covering both fundamentals and news sentiment (if available).
 
 Stock: {row.get('Symbol')} ({row.get('Name')})
 Sector: {row.get('Sector')} | Category: {row.get('Cap Category')}
@@ -36,7 +54,7 @@ P/E: {row.get('P/E')} | P/B: {row.get('P/B')} | EPS: ₹{row.get('EPS')}
 Market Cap: ₹{row.get('Mkt Cap (₹Cr)')} Cr | Revenue: ₹{row.get('Revenue (₹Cr)')} Cr
 Net Income: ₹{row.get('Net Inc (₹Cr)')} Cr | Div Yield: {row.get('Div Yield %')}%
 Beta: {row.get('Beta')} | 52W High: ₹{row.get('52W High')} | 52W Low: ₹{row.get('52W Low')}
-
+{news_block}
 Be concise. Start with "Signal: BUY/HOLD/SELL".
 """
     try:
