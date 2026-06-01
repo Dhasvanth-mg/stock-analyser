@@ -215,10 +215,13 @@ with col_left:
         # Intraday (1D/1W) → area line; multi-day → candlestick
         if period_sel in ("1D", "1W"):
             cc_line = "#10b981" if c50 >= 0 else "#ef4444"
+            _lo = df_n50["Close"].min(); _hi = df_n50["Close"].max()
+            _pad = (_hi - _lo) * 0.15 or _lo * 0.002
             fig.add_trace(go.Scatter(
                 x=df_n50.index, y=df_n50["Close"], mode="lines",
                 name="NIFTY 50", line=dict(color=cc_line, width=2),
-                fill="tozeroy", fillcolor=f"rgba({'16,185,129' if c50>=0 else '239,68,68'},.06)",
+                fill="toself",
+                fillcolor=f"rgba({'16,185,129' if c50>=0 else '239,68,68'},.06)",
                 hovertemplate="%{x}<br><b>%{y:,.2f}</b><extra></extra>",
             ))
         else:
@@ -233,13 +236,16 @@ with col_left:
             fig.add_trace(go.Scatter(x=df_n50.index, y=df_n50["SMA50"],
                 name="SMA 50", line=dict(color="#f59e0b", width=1.4)))
 
+        _yaxis_cfg = dict(gridcolor="#0d1e30", zerolinecolor="#0d1e30", tickformat=",.0f")
+        if period_sel in ("1D", "1W"):
+            _yaxis_cfg["range"] = [_lo - _pad, _hi + _pad]
+
         fig.update_layout(
             template="plotly_dark", paper_bgcolor=_CHART_BG, plot_bgcolor=_CHART_BG,
             height=360, margin=dict(l=0, r=0, t=10, b=0),
             xaxis_rangeslider_visible=False,
             xaxis=dict(gridcolor="#0d1e30", zerolinecolor="#0d1e30"),
-            yaxis=dict(gridcolor="#0d1e30", zerolinecolor="#0d1e30",
-                       tickformat=",.0f"),
+            yaxis=_yaxis_cfg,
             legend=dict(orientation="h", y=1.04, font=dict(size=10)),
             hoverlabel=dict(bgcolor="#0d1e30", bordercolor="#1e3450", font_size=12),
             annotations=[dict(
@@ -262,13 +268,17 @@ with col_left:
     def _spark(df, chg):
         is_up = chg >= 0
         color = "#10b981" if is_up else "#ef4444"
-        fill  = "rgba(16,185,129,.07)" if is_up else "rgba(239,68,68,.07)"
+        fill  = "rgba(16,185,129,.08)" if is_up else "rgba(239,68,68,.08)"
         fig2  = go.Figure()
+        y_range = None
         if not df.empty:
+            lo = df["Close"].min(); hi = df["Close"].max()
+            pad = (hi - lo) * 0.2 or lo * 0.002
+            y_range = [lo - pad, hi + pad]
             fig2.add_trace(go.Scatter(
                 x=df.index, y=df["Close"], mode="lines",
                 line=dict(color=color, width=1.6),
-                fill="tozeroy", fillcolor=fill,
+                fill="toself", fillcolor=fill,
                 hovertemplate="%{x|%H:%M}  %{y:,.2f}<extra></extra>",
             ))
         fig2.update_layout(
@@ -280,7 +290,8 @@ with col_left:
             yaxis=dict(showgrid=True, gridcolor="#142438",
                        showticklabels=True,
                        tickfont=dict(size=8, color="#475569"),
-                       tickformat=",.0f", showline=False),
+                       tickformat=",.0f", showline=False,
+                       range=y_range),
             showlegend=False,
             hoverlabel=dict(bgcolor="#0d1e30", font_size=10),
         )
