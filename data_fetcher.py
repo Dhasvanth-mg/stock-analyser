@@ -235,6 +235,46 @@ def fetch_single_stock(symbol: str) -> dict | None:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
+def resolve_and_fetch_history(symbol: str, period: str = "6mo") -> tuple[pd.DataFrame, str]:
+    """
+    Try multiple ticker variants until we get price history.
+    Returns (DataFrame, resolved_ticker) — DataFrame is empty if all fail.
+    """
+    sym = symbol.upper().strip()
+    candidates = [
+        f"{sym}.NS",                        # NSE first
+        f"{sym}.BO",                        # BSE fallback
+        f"{sym.replace('-','')}  .NS",      # strip hyphens
+        f"{sym.replace(' ','')}.NS",        # strip spaces
+    ]
+    for ticker_str in candidates:
+        ticker_str = ticker_str.strip()
+        try:
+            df = yf.Ticker(ticker_str).history(period=period)
+            if not df.empty:
+                df.index = pd.to_datetime(df.index)
+                return df, ticker_str
+        except Exception:
+            continue
+
+    # Last resort: yfinance search
+    try:
+        import yfinance as _yf
+        results = _yf.Search(sym, max_results=8).quotes
+        for q in results:
+            if q.get("exchange") in ("NSI", "BSE", "NSE", "NMS"):
+                t = q.get("symbol", "")
+                df = yf.Ticker(t).history(period=period)
+                if not df.empty:
+                    df.index = pd.to_datetime(df.index)
+                    return df, t
+    except Exception:
+        pass
+
+    return pd.DataFrame(), ""
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
     try:
         df = yf.Ticker(f"{symbol}.NS").history(period=period)

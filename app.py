@@ -20,7 +20,7 @@ from data_fetcher import (
 from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
 from news_fetcher import get_news_summary, fetch_all_news, score_market_news
 from screener_search import search_screener, fetch_company_data, fetch_bse_announcements, get_bse_code
-from data_fetcher import fetch_single_stock, fetch_history
+from data_fetcher import fetch_single_stock, fetch_history, resolve_and_fetch_history
 
 load_dotenv()
 
@@ -1205,10 +1205,21 @@ with tab6:
                 st.markdown("**📈 Price Chart**")
                 ds_period = st.radio("Period", ["1mo","3mo","6mo","1y","2y"], index=2,
                                      horizontal=True, key="ds_period")
-                with st.spinner(f"Loading {symbol_guess} chart…"):
-                    ds_hist = fetch_history(symbol_guess, ds_period)
+
+                # Use NSE code from screener page if available, else fallback to slug
+                _nse_from_page = data.get("nse_code", "").strip()
+                _sym_to_try    = _nse_from_page or symbol_guess
+
+                with st.spinner(f"Loading chart for {_sym_to_try}…"):
+                    ds_hist, ds_ticker = resolve_and_fetch_history(_sym_to_try, ds_period)
+
+                # If NSE code from page failed, also try the raw slug
+                if ds_hist.empty and _sym_to_try != symbol_guess:
+                    with st.spinner(f"Trying {symbol_guess}…"):
+                        ds_hist, ds_ticker = resolve_and_fetch_history(symbol_guess, ds_period)
 
                 if not ds_hist.empty:
+                    st.caption(f"Resolved ticker: `{ds_ticker}`")
                     ds_hist["SMA20"] = ds_hist["Close"].rolling(20).mean()
                     ds_hist["SMA50"] = ds_hist["Close"].rolling(50).mean()
                     delta = ds_hist["Close"].diff()
@@ -1248,12 +1259,18 @@ with tab6:
                     fig_ds.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100])
                     st.plotly_chart(fig_ds, use_container_width=True)
                 else:
-                    st.info(f"No price history available for {symbol_guess} on NSE.")
+                    st.warning(
+                        f"Could not find price history for **{symbol_guess}** on NSE or BSE. "
+                        f"The stock may be delisted, have a different ticker, or be temporarily unavailable."
+                    )
 
                 # ── Live stock data from yfinance ─────────────────────────
                 st.markdown("---")
                 st.markdown("**📡 Live Market Data (NSE)**")
-                with st.spinner(f"Fetching live data for {symbol_guess}…"):
+                _live_sym = _nse_from_page or symbol_guess
+                with st.spinner(f"Fetching live data for {_live_sym}…"):
+                    live = fetch_single_stock(_live_sym)
+                if not live and _live_sym != symbol_guess:
                     live = fetch_single_stock(symbol_guess)
                 if live:
                     lc1, lc2, lc3, lc4 = st.columns(4)

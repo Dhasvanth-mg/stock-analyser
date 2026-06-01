@@ -111,6 +111,28 @@ def fetch_company_data(screener_url: str) -> dict:
     about = soup.find("div", {"id": "company-info"})
     result["about"] = about.get_text(" ", strip=True)[:500] if about else ""
 
+    # ── NSE / BSE codes (scraped from page header) ────────────────────────
+    result["nse_code"] = ""
+    result["bse_code"] = ""
+    for a in soup.select("a[href*='nseindia'], a[href*='bseindia'], .company-links a"):
+        txt = a.get_text(strip=True).upper()
+        href = a.get("href", "")
+        if "nseindia" in href or "NSE" in a.get_text():
+            # Try to pull the ticker from text or href
+            import re as _re
+            m = _re.search(r'symbol=([A-Z0-9&\-]+)', href)
+            if m:
+                result["nse_code"] = m.group(1)
+    # Fallback: look for NSE: TICKER pattern in page text
+    import re as _re
+    page_text = soup.get_text(" ")
+    m_nse = _re.search(r'NSE[:\s]+([A-Z0-9&\-]{2,20})', page_text)
+    m_bse = _re.search(r'BSE[:\s]+([0-9]{5,6})', page_text)
+    if m_nse and not result["nse_code"]:
+        result["nse_code"] = m_nse.group(1).strip()
+    if m_bse:
+        result["bse_code"] = m_bse.group(1).strip()
+
     # ── Quarterly results ─────────────────────────────────────────────────
     qr_sec = soup.find("section", {"id": "quarters"})
     result["quarterly"] = _parse_table(qr_sec)
