@@ -131,7 +131,7 @@ with st.sidebar:
         ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "Revenue (₹Cr)", "P/E", "EPS"],
     )
     sort_asc = st.checkbox("Ascending", value=False)
-    max_rows  = st.slider("Max rows", 10, 500, 100, step=10)
+    max_rows  = st.slider("Max rows", 10, 500, 50, step=10)
 
     st.markdown("---")
     refresh = st.button("🔄 Refresh Data", use_container_width=True)
@@ -141,8 +141,9 @@ with st.sidebar:
 # ── Load data ─────────────────────────────────────────────────────────────────
 symbols = get_all_symbols(cap_filter)
 
-with st.spinner(f"Loading {len(symbols)} stocks…"):
-    df = fetch_stock_batch(symbols)
+_prog = st.progress(0, text=f"Loading {len(symbols)} stocks…")
+df = fetch_stock_batch(symbols)
+_prog.empty()
 
 if df.empty:
     st.error("Could not fetch any stock data. Check your internet connection.")

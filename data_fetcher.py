@@ -213,25 +213,17 @@ def _fetch_one(sym: str, cap_labels: dict, sector_map: dict) -> dict | None:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
-    """Parallel fetch for up to 500 stocks using ThreadPoolExecutor."""
+    """Parallel fetch using ThreadPoolExecutor. No Streamlit UI calls inside."""
     cap_labels, sector_map = load_universe()
-
     rows = []
-    progress = st.progress(0, text="Fetching stock data…")
-    total = len(symbols)
 
-    with ThreadPoolExecutor(max_workers=12) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(_fetch_one, sym, cap_labels, sector_map): sym
                    for sym in symbols}
-        done = 0
         for future in as_completed(futures):
             result = future.result()
             if result:
                 rows.append(result)
-            done += 1
-            progress.progress(done / total, text=f"Fetching… {done}/{total} stocks")
-
-    progress.empty()
     return pd.DataFrame(rows)
 
 
