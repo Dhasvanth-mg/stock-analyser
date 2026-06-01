@@ -5,7 +5,9 @@ Sliders: Price range, Revenue range, Market Cap range
 AI: Groq llama3-70b analysis per stock
 """
 
+import json
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -820,34 +822,228 @@ with tab5:
 
 # ── TAB 6: Heatmap ────────────────────────────────────────────────────────────
 with tab6:
-    st.markdown("#### Market Cap Heatmap by Sector")
+    st.markdown("#### Market Cap Heatmap — hover any tile for aggregated or per-stock stats")
 
     hm_data = filtered[filtered["Mkt Cap (₹Cr)"] > 0].copy()
-    if not hm_data.empty:
-        fig3 = px.treemap(
-            hm_data,
-            path=["Cap Category", "Sector", "Symbol"],
-            values="Mkt Cap (₹Cr)",
-            color="Change %",
-            color_continuous_scale=["#ef4444", "#1e293b", "#22c55e"],
-            color_continuous_midpoint=0,
-            custom_data=["Name", "Price (₹)", "P/E"],
-            title="",
-        )
-        fig3.update_traces(
-            textinfo="label+value",
-            hovertemplate="<b>%{label}</b><br>%{customdata[0]}<br>₹%{customdata[1]}<br>P/E: %{customdata[2]}<extra></extra>"
-        )
-        fig3.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="#0f172a",
-            height=580,
-            margin=dict(l=0, r=0, t=10, b=0),
-            coloraxis_colorbar=dict(title="Change %"),
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-    else:
+
+    if hm_data.empty:
         st.info("No data available for heatmap with current filters.")
+    else:
+        # ── Build ECharts tree ────────────────────────────────────────────
+        def _safe(v, fmt="{:.1f}", fallback="—"):
+            try:
+                return fmt.format(float(v)) if v and float(v) != 0 else fallback
+            except Exception:
+                return fallback
+
+        def _agg_node(df, name, level):
+            avg_pe  = df["P/E"].replace(0, float("nan")).mean()
+            avg_pb  = df["P/B"].replace(0, float("nan")).mean()
+            avg_eps = df["EPS"].replace(0, float("nan")).mean()
+            avg_bet = df["Beta"].replace(0, float("nan")).mean()
+            avg_chg = df["Change %"].mean()
+            return {
+                "name":      name,
+                "value":     [round(df["Mkt Cap (₹Cr)"].sum(), 1), round(avg_chg, 2)],
+                "level":     level,
+                "totalMcap": f"₹{df['Mkt Cap (₹Cr)'].sum():,.0f} Cr",
+                "avgPE":     _safe(avg_pe,  "{:.1f}"),
+                "avgPB":     _safe(avg_pb,  "{:.2f}"),
+                "avgEPS":    "₹" + _safe(avg_eps, "{:.2f}"),
+                "totalRev":  f"₹{df['Revenue (₹Cr)'].sum():,.0f} Cr",
+                "totalNI":   f"₹{df['Net Inc (₹Cr)'].sum():,.0f} Cr",
+                "avgDiv":    f"{df['Div Yield %'].mean():.2f}%",
+                "avgChg":    f"{avg_chg:+.2f}%",
+                "avgBeta":   _safe(avg_bet, "{:.2f}"),
+                "nStocks":   str(len(df)),
+            }
+
+        tree = []
+        for cap in hm_data["Cap Category"].unique():
+            cap_df   = hm_data[hm_data["Cap Category"] == cap]
+            cap_node = _agg_node(cap_df, cap, "cap")
+            sectors  = []
+
+            for sector in cap_df["Sector"].unique():
+                sec_df   = cap_df[cap_df["Sector"] == sector]
+                sec_node = _agg_node(sec_df, sector, "sector")
+                stocks   = []
+
+                for _, s in sec_df.iterrows():
+                    stocks.append({
+                        "name":     s["Symbol"],
+                        "value":    [round(s["Mkt Cap (₹Cr)"], 1), round(s["Change %"], 2)],
+                        "level":    "stock",
+                        "fullName": s["Name"],
+                        "price":    f"₹{s['Price (₹)']:,.2f}",
+                        "chgRaw":   round(s["Change %"], 2),
+                        "chg":      f"{s['Change %']:+.2f}%",
+                        "mcap":     f"₹{s['Mkt Cap (₹Cr)']:,.0f} Cr",
+                        "pe":       _safe(s["P/E"],  "{:.1f}"),
+                        "pb":       _safe(s["P/B"],  "{:.2f}"),
+                        "eps":      "₹" + _safe(s["EPS"], "{:.2f}"),
+                        "rev":      f"₹{s['Revenue (₹Cr)']:,.0f} Cr",
+                        "ni":       f"₹{s['Net Inc (₹Cr)']:,.0f} Cr",
+                        "div":      f"{s['Div Yield %']:.2f}%",
+                        "beta":     _safe(s["Beta"], "{:.2f}"),
+                        "sector":   s["Sector"],
+                    })
+
+                sec_node["children"] = stocks
+                sectors.append(sec_node)
+
+            cap_node["children"] = sectors
+            tree.append(cap_node)
+
+        tree_json = json.dumps(tree)
+
+        # ── ECharts HTML (CDN, no package required) ───────────────────────
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  body {{ margin:0; padding:0; background:#0f172a; overflow:hidden; }}
+  #chart {{ width:100%; height:610px; }}
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<script>
+var chart = echarts.init(document.getElementById('chart'), 'dark', {{renderer:'canvas'}});
+var treeData = {tree_json};
+
+var option = {{
+  backgroundColor: '#0f172a',
+  tooltip: {{
+    trigger: 'item',
+    backgroundColor: '#1e293b',
+    borderColor: '#334155',
+    borderWidth: 1,
+    padding: 12,
+    extraCssText: 'border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);font-family:monospace',
+    formatter: function(params) {{
+      var d = params.data;
+      if (!d) return '';
+      function row(label, val) {{
+        return '<tr><td style="color:#94a3b8;padding:2px 12px 2px 0">' + label + '</td>'
+             + '<td style="color:#f1f5f9;text-align:right">' + val + '</td></tr>';
+      }}
+      var html = '<div style="min-width:230px">';
+      html += '<div style="font-weight:700;font-size:13px;color:#f1f5f9;margin-bottom:6px">' + d.name + '</div>';
+
+      if (d.level === 'stock') {{
+        html += '<div style="color:#94a3b8;font-size:11px;margin-bottom:8px">' + (d.fullName||'') + ' &bull; ' + (d.sector||'') + '</div>';
+        var chgColor = d.chgRaw >= 0 ? '#22c55e' : '#ef4444';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += row('Price',     d.price);
+        html += row('Change',    '<span style="color:' + chgColor + ';font-weight:600">' + d.chg + '</span>');
+        html += row('Mkt Cap',   d.mcap);
+        html += row('P/E',       d.pe);
+        html += row('P/B',       d.pb);
+        html += row('EPS',       d.eps);
+        html += row('Revenue',   d.rev);
+        html += row('Net Inc',   d.ni);
+        html += row('Div Yield', d.div);
+        html += row('Beta',      d.beta);
+        html += '</table>';
+      }} else {{
+        var icon = d.level === 'cap' ? '🏦' : '🏭';
+        html += '<div style="color:#94a3b8;font-size:11px;margin-bottom:8px">' + icon + ' ' + d.nStocks + ' stocks</div>';
+        var chgColor = (d.avgChg||'').startsWith('+') ? '#22c55e' : '#ef4444';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+        html += row('Total Mkt Cap', d.totalMcap);
+        html += row('Avg P/E',       d.avgPE);
+        html += row('Avg P/B',       d.avgPB);
+        html += row('Avg EPS',       d.avgEPS);
+        html += row('Total Revenue', d.totalRev);
+        html += row('Total Net Inc', d.totalNI);
+        html += row('Avg Div Yield', d.avgDiv);
+        html += row('Avg Change',    '<span style="color:' + chgColor + ';font-weight:600">' + d.avgChg + '</span>');
+        html += row('Avg Beta',      d.avgBeta);
+        html += '</table>';
+      }}
+      html += '</div>';
+      return html;
+    }}
+  }},
+  visualMap: {{
+    type: 'continuous',
+    min: -5,
+    max: 5,
+    dimension: 1,
+    inRange: {{ color: ['#ef4444','#1e293b','#22c55e'] }},
+    show: true,
+    orient: 'vertical',
+    right: 8,
+    top: 'center',
+    itemHeight: 180,
+    text: ['+5%', '-5%'],
+    textStyle: {{ color: '#94a3b8', fontSize: 11 }},
+    calculable: true
+  }},
+  series: [{{
+    type: 'treemap',
+    data: treeData,
+    roam: false,
+    nodeClick: 'zoomToNode',
+    width: '94%',
+    height: '94%',
+    top: '2%',
+    left: '2%',
+    squareRatio: 0.7,
+    visualDimension: 1,
+    breadcrumb: {{
+      show: true,
+      bottom: 4,
+      height: 24,
+      itemStyle: {{
+        color: '#1e293b',
+        textStyle: {{ color: '#94a3b8', fontSize: 11 }}
+      }}
+    }},
+    label: {{
+      show: true,
+      formatter: '{{b}}',
+      color: '#f1f5f9',
+      fontSize: 11,
+      fontWeight: 'bold',
+      overflow: 'truncate'
+    }},
+    upperLabel: {{
+      show: true,
+      height: 26,
+      color: '#f1f5f9',
+      fontSize: 12,
+      fontWeight: 'bold',
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      padding: [4, 8]
+    }},
+    itemStyle: {{
+      borderColor: '#0f172a',
+      borderWidth: 2,
+      gapWidth: 2
+    }},
+    levels: [
+      {{ itemStyle: {{ borderWidth: 0, gapWidth: 6 }} }},
+      {{ itemStyle: {{ borderWidth: 3, borderColor: '#334155', gapWidth: 4 }},
+         upperLabel: {{ show: true }} }},
+      {{ itemStyle: {{ borderWidth: 2, borderColor: '#1e293b', gapWidth: 2 }},
+         upperLabel: {{ show: true }} }},
+      {{ itemStyle: {{ borderWidth: 1, borderColor: '#0f172a', gapWidth: 1 }} }}
+    ]
+  }}]
+}};
+
+chart.setOption(option);
+window.addEventListener('resize', function() {{ chart.resize(); }});
+</script>
+</body>
+</html>
+"""
+        components.html(html, height=630, scrolling=False)
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
