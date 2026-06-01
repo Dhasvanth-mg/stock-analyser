@@ -1,11 +1,11 @@
-"""Market Cap Heatmap — ECharts treemap with aggregated hover."""
+﻿"""Market Cap Heatmap — ECharts treemap with aggregated hover."""
 
 import json
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
-from utils import inject_css, render_header, page_cfg
+from utils import inject_css, render_header, page_cfg, render_nav
 
 from data_fetcher import fetch_stock_batch, get_all_symbols
 
@@ -13,6 +13,7 @@ load_dotenv()
 page_cfg("Heatmap · NSE")
 inject_css()
 render_header("🗂️ Market Heatmap", "Hover any tile for aggregated stats · click to zoom")
+render_nav("pages/5_Heatmap.py")
 
 # Cap filter
 if "cap_filter" not in st.session_state:
@@ -133,3 +134,4 @@ window.addEventListener('resize',function(){{chart.resize();}});
 </script></body></html>"""
 
 components.html(html, height=660, scrolling=False)
+

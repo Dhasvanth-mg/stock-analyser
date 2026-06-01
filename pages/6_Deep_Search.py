@@ -1,10 +1,10 @@
-"""Deep Search — Screener.in financials, charts, live data, sentiment."""
+﻿"""Deep Search — Screener.in financials, charts, live data, sentiment."""
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from utils import inject_css, render_header, page_cfg, candle_with_rsi, _CHART_BG
+from utils import inject_css, render_header, page_cfg, render_nav, candle_with_rsi, _CHART_BG
 
 from screener_search import search_screener, fetch_company_data, fetch_bse_announcements, get_bse_code
 from data_fetcher import fetch_single_stock, resolve_and_fetch_history
@@ -15,6 +15,7 @@ load_dotenv()
 page_cfg("Deep Search · NSE")
 inject_css()
 render_header("🔍 Deep Search", "Screener.in financials · Live chart · AI signal · News sentiment")
+render_nav("pages/6_Deep_Search.py")
 
 # Prefill from home page if coming from search
 _default_q = st.session_state.get("home_search", "")
@@ -273,3 +274,4 @@ with right:
             "<div style='text-align:center;color:#1e3450;padding:100px 0'>"
             "Search for a company on the left to load detailed financials"
             "</div>", unsafe_allow_html=True)
+

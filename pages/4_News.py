@@ -1,9 +1,9 @@
-"""News & Sentiment — per-stock and market-wide."""
+﻿"""News & Sentiment — per-stock and market-wide."""
 
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from utils import inject_css, render_header, page_cfg, _CHART_BG
+from utils import inject_css, render_header, page_cfg, render_nav, _CHART_BG
 
 from data_fetcher import fetch_stock_batch, get_all_symbols
 from news_fetcher import get_news_summary, fetch_all_news, score_market_news
@@ -13,6 +13,7 @@ page_cfg("News & Sentiment · NSE")
 inject_css()
 render_header("📰 News & Sentiment",
               "Groww · Google News · Economic Times · Moneycontrol · Business Standard · LiveMint")
+render_nav("pages/4_News.py")
 
 with st.spinner("Loading stock list…"):
     df = fetch_stock_batch(get_all_symbols("Blue Chip"))
@@ -151,3 +152,4 @@ with right:
             "<div style='text-align:center;color:#1e3450;padding:80px 0'>"
             "Pick a stock and click Fetch & Score, or scan market-wide news</div>",
             unsafe_allow_html=True)
+

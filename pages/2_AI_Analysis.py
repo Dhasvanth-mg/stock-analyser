@@ -1,9 +1,9 @@
-"""AI Analysis — Groq stock signal with chart, RSI, and news context."""
+﻿"""AI Analysis — Groq stock signal with chart, RSI, and news context."""
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from utils import inject_css, render_header, page_cfg, candle_with_rsi
+from utils import inject_css, render_header, page_cfg, render_nav, candle_with_rsi
 
 from data_fetcher import fetch_stock_batch, get_all_symbols, fetch_history
 from ai_analyst import get_ai_analysis, get_portfolio_summary
@@ -13,6 +13,7 @@ load_dotenv()
 page_cfg("AI Analysis · NSE")
 inject_css()
 render_header("🤖 AI Analysis", "Groq llama-3.3-70b · Fundamentals + News Sentiment")
+render_nav("pages/2_AI_Analysis.py")
 
 # ── Sidebar: pick stock ───────────────────────────────────────────────────────
 with st.sidebar:
@@ -89,3 +90,4 @@ with right:
         rows = df[df["Symbol"].isin(watchlist)].to_dict("records")
         with st.spinner("Generating portfolio summary…"):
             st.success(get_portfolio_summary(rows))
+

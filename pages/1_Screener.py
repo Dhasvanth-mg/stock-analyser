@@ -1,10 +1,10 @@
-"""Stock Screener — filters, sliders, sortable table, CSV export."""
+﻿"""Stock Screener — filters, sliders, sortable table, CSV export."""
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from utils import inject_css, render_header, page_cfg
+from utils import inject_css, render_header, page_cfg, render_nav
 
 from data_fetcher import fetch_stock_batch, get_all_symbols
 
@@ -12,6 +12,7 @@ load_dotenv()
 page_cfg("Screener · NSE")
 inject_css()
 render_header("📋 Stock Screener", "Filter · Sort · Export")
+render_nav("pages/1_Screener.py")
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "cap_filter" not in st.session_state:
@@ -148,3 +149,4 @@ styled = (disp.style
 
 st.dataframe(styled, use_container_width=True, height=540)
 st.download_button("⬇️ Export CSV", disp.to_csv(index=False), "nse_stocks.csv", "text/csv")
+

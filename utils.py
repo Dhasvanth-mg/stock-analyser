@@ -129,6 +129,27 @@ section[data-testid="stSidebar"] h3{font-size:.7rem;color:var(--muted);
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:var(--blue)}
+
+/* ── Hide Streamlit chrome on all pages ── */
+.main .block-container        { padding-top:.35rem !important; }
+header[data-testid="stHeader"]{ display:none !important; }
+#MainMenu                     { display:none !important; }
+.stDeployButton               { display:none !important; }
+section[data-testid="stSidebar"]          { display:none !important; }
+[data-testid="collapsedControl"]          { display:none !important; }
+button[data-testid="stBaseButton-minimal"]{ display:none !important; }
+
+/* ── Nav bar (shared across pages) ── */
+.nav-bar{display:flex;gap:5px;background:#0d1e30;border:1px solid #1e3450;
+  border-radius:12px;padding:5px 8px;margin-bottom:.6rem;flex-wrap:nowrap;
+  align-items:center;overflow-x:auto}
+.nav-bar .stButton>button{border-radius:8px!important;font-size:.75rem!important;
+  font-weight:600!important;padding:4px 12px!important;border:none!important;
+  background:transparent!important;color:#64748b!important;transition:all .15s!important;
+  white-space:nowrap!important}
+.nav-bar .stButton>button:hover{background:#142438!important;color:#e2e8f0!important}
+.nav-active .stButton>button{background:#142438!important;color:#60a5fa!important;
+  border:1px solid #1e3450!important}
 </style>
 """
 
@@ -166,6 +187,33 @@ def render_header(title: str = "📈 NSE Stock Analyser", subtitle: str = ""):
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+
+_NAV_PAGES = [
+    ("🏠 Dashboard",   "app.py"),
+    ("📋 Screener",    "pages/1_Screener.py"),
+    ("🤖 AI Analysis", "pages/2_AI_Analysis.py"),
+    ("⚖️ Compare",     "pages/3_Compare.py"),
+    ("📰 News",        "pages/4_News.py"),
+    ("🔍 Deep Search", "pages/6_Deep_Search.py"),
+    ("🗂️ Heatmap",     "pages/5_Heatmap.py"),
+]
+
+def render_nav(active_path: str = ""):
+    """Render horizontal nav bar. active_path = current page file path."""
+    st.markdown('<div class="nav-bar">', unsafe_allow_html=True)
+    cols = st.columns(len(_NAV_PAGES))
+    for i, (label, path) in enumerate(_NAV_PAGES):
+        is_active = (path == active_path or
+                     (active_path == "" and path == "app.py"))
+        with cols[i]:
+            st.markdown(f'<div class="{"nav-active" if is_active else ""}">',
+                        unsafe_allow_html=True)
+            if st.button(label, key=f"nav_{i}_{active_path}", use_container_width=True):
+                if not is_active:
+                    st.switch_page(path)
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def page_cfg(title: str = "NSE Stock Analyser"):

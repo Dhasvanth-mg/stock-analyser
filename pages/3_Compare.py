@@ -1,10 +1,10 @@
-"""Stock Comparison — radar chart, metric cards, AI verdict."""
+﻿"""Stock Comparison — radar chart, metric cards, AI verdict."""
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from utils import inject_css, render_header, page_cfg, _CHART_BG
+from utils import inject_css, render_header, page_cfg, render_nav, _CHART_BG
 
 from data_fetcher import fetch_stock_batch, get_all_symbols
 from ai_analyst import compare_stocks
@@ -13,6 +13,7 @@ load_dotenv()
 page_cfg("Compare · NSE")
 inject_css()
 render_header("⚖️ Stock Comparison", "Multi-stock radar · AI picks the best")
+render_nav("pages/3_Compare.py")
 
 with st.spinner("Loading stocks…"):
     df = fetch_stock_batch(get_all_symbols("All"))
@@ -113,3 +114,4 @@ with right:
                 f"border-radius:9px;padding:10px 16px;font-weight:700;color:#34d399;margin-bottom:10px'>"
                 f"🏆 Best Pick: {winner}</div>", unsafe_allow_html=True)
         st.info(verdict)
+
