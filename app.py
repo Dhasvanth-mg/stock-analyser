@@ -19,6 +19,7 @@ from data_fetcher import (
 )
 from ai_analyst import get_ai_analysis, get_portfolio_summary, compare_stocks
 from news_fetcher import get_news_summary, fetch_all_news, score_market_news
+from screener_search import search_screener, fetch_company_data, fetch_bse_announcements, get_bse_code
 
 load_dotenv()
 
@@ -188,7 +189,7 @@ with c5:
 st.markdown("---")
 
 # ── Main tabs ─────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "⚖️ Compare", "📰 News & Sentiment", "🗂️ Heatmap"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📋 Screener", "📈 Chart", "🤖 AI Analysis", "⚖️ Compare", "📰 News & Sentiment", "🔍 Deep Search", "🗂️ Heatmap"])
 
 # ── TAB 1: Screener table ─────────────────────────────────────────────────────
 with tab1:
@@ -821,8 +822,186 @@ with tab5:
                 st.caption(f"{n_arts} articles · {n_stocks} stocks · {n_sources} sources")
 
 
-# ── TAB 6: Heatmap ────────────────────────────────────────────────────────────
+# ── TAB 6: Deep Search (Screener.in) ──────────────────────────────────────────
 with tab6:
+    st.markdown("#### 🔍 Deep Search — powered by Screener.in")
+
+    sr_col1, sr_col2 = st.columns([1, 2])
+
+    with sr_col1:
+        query = st.text_input("Search by name or symbol", placeholder="e.g. Reliance, HDFCBANK, Infosys…")
+        results = search_screener(query) if query else []
+
+        if results:
+            options = {r["name"]: r["url"] for r in results if r.get("type") == "equity"}
+            if not options:
+                options = {r["name"]: r["url"] for r in results}
+            chosen_name = st.selectbox("Select company", list(options.keys()))
+            chosen_url  = options[chosen_name]
+            load_btn    = st.button("📊 Load Full Financials", use_container_width=True, type="primary")
+
+            # Consolidated toggle
+            use_consolidated = st.checkbox("Consolidated financials", value=True)
+            if use_consolidated and not chosen_url.endswith("consolidated/"):
+                chosen_url = chosen_url.rstrip("/") + "/consolidated/"
+
+            # BSE announcements
+            st.markdown("---")
+            symbol_guess = chosen_url.split("/company/")[-1].split("/")[0]
+            ann_days = st.slider("Announcements (days back)", 7, 90, 30)
+            load_ann = st.button("📢 Load Announcements", use_container_width=True)
+
+        elif query:
+            st.info("No results found — try a different name or symbol.")
+            load_btn, load_ann = False, False
+            chosen_url, symbol_guess, ann_days = "", "", 30
+        else:
+            load_btn, load_ann = False, False
+            chosen_url, symbol_guess, ann_days = "", "", 30
+
+    with sr_col2:
+        if load_btn and chosen_url:
+            with st.spinner(f"Fetching data from Screener.in…"):
+                data = fetch_company_data(chosen_url)
+
+            if not data:
+                st.error("Could not load data. Screener.in may be temporarily unavailable.")
+            else:
+                # ── Company name ──────────────────────────────────────────
+                st.markdown(
+                    f"<div style='background:#1e293b;border-radius:10px;padding:14px 18px;"
+                    f"border-left:4px solid #3b82f6;margin-bottom:14px'>"
+                    f"<span style='font-size:1.2rem;font-weight:700;color:#f1f5f9'>"
+                    f"{data.get('name','')}</span><br>"
+                    f"<span style='color:#94a3b8;font-size:0.85rem'>"
+                    f"<a href='https://www.screener.in{chosen_url}' target='_blank' "
+                    f"style='color:#60a5fa'>View on Screener.in ↗</a></span></div>",
+                    unsafe_allow_html=True,
+                )
+
+                # ── Key ratios grid ───────────────────────────────────────
+                ratios = data.get("ratios", {})
+                if ratios:
+                    st.markdown("**Key Ratios**")
+                    ratio_items = list(ratios.items())
+                    cols = st.columns(4)
+                    for i, (k, v) in enumerate(ratio_items):
+                        cols[i % 4].metric(k, v)
+
+                # ── Pros & Cons ───────────────────────────────────────────
+                pros = data.get("pros", [])
+                cons = data.get("cons", [])
+                if pros or cons:
+                    pc1, pc2 = st.columns(2)
+                    with pc1:
+                        if pros:
+                            st.markdown("**✅ Pros**")
+                            for p in pros[:5]:
+                                st.markdown(f"<div style='background:#166534;color:#bbf7d0;border-radius:6px;"
+                                            f"padding:6px 10px;margin-bottom:4px;font-size:0.83rem'>{p}</div>",
+                                            unsafe_allow_html=True)
+                    with pc2:
+                        if cons:
+                            st.markdown("**❌ Cons**")
+                            for c in cons[:5]:
+                                st.markdown(f"<div style='background:#7f1d1d;color:#fecaca;border-radius:6px;"
+                                            f"padding:6px 10px;margin-bottom:4px;font-size:0.83rem'>{c}</div>",
+                                            unsafe_allow_html=True)
+
+                # ── Tabs for financial tables ──────────────────────────────
+                ft1, ft2, ft3, ft4, ft5, ft6 = st.tabs([
+                    "Quarterly", "P&L", "Balance Sheet", "Cash Flow", "Ratios", "Shareholding"
+                ])
+
+                def _show_table(df: pd.DataFrame):
+                    if df.empty:
+                        st.info("No data available.")
+                        return
+                    st.dataframe(
+                        df.style.set_properties(**{"background-color": "#0f172a", "color": "#e2e8f0"}),
+                        use_container_width=True,
+                    )
+
+                with ft1: _show_table(data.get("quarterly", pd.DataFrame()))
+                with ft2:
+                    pnl = data.get("pnl", pd.DataFrame())
+                    _show_table(pnl)
+                    # Revenue trend chart
+                    if not pnl.empty and "Sales" in pnl.columns:
+                        try:
+                            sales_row = pnl[pnl.iloc[:, 0].astype(str).str.contains("Sales|Revenue", case=False, na=False)]
+                            if not sales_row.empty:
+                                years = [c for c in pnl.columns if c not in [pnl.columns[0], "TTM"]]
+                                vals  = sales_row.iloc[0][years].astype(str).str.replace(",", "").replace("—", "0")
+                                fig_rev = go.Figure(go.Bar(x=years, y=pd.to_numeric(vals, errors="coerce"),
+                                                           marker_color="#3b82f6", name="Revenue"))
+                                fig_rev.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
+                                                      plot_bgcolor="#0f172a", height=260,
+                                                      margin=dict(l=0, r=0, t=20, b=0),
+                                                      title="Revenue trend (₹ Cr)")
+                                st.plotly_chart(fig_rev, use_container_width=True)
+                        except Exception:
+                            pass
+                with ft3: _show_table(data.get("balance_sheet", pd.DataFrame()))
+                with ft4: _show_table(data.get("cash_flow", pd.DataFrame()))
+                with ft5: _show_table(data.get("fin_ratios", pd.DataFrame()))
+                with ft6:
+                    sh = data.get("shareholding", pd.DataFrame())
+                    _show_table(sh)
+                    # Shareholding pie for latest period
+                    if not sh.empty:
+                        try:
+                            latest_col = sh.columns[-1]
+                            labels = sh.iloc[:, 0].astype(str).tolist()
+                            vals   = pd.to_numeric(sh[latest_col].astype(str).str.replace("%","").str.replace(",",""),
+                                                   errors="coerce").fillna(0).tolist()
+                            if any(v > 0 for v in vals):
+                                fig_sh = go.Figure(go.Pie(
+                                    labels=labels, values=vals, hole=0.45,
+                                    marker_colors=["#3b82f6","#22c55e","#f59e0b","#ef4444","#a78bfa","#06b6d4"],
+                                    textinfo="label+percent",
+                                ))
+                                fig_sh.update_layout(template="plotly_dark", paper_bgcolor="#0f172a",
+                                                     height=300, margin=dict(l=0,r=0,t=10,b=0),
+                                                     showlegend=False,
+                                                     title=f"Shareholding — {latest_col}")
+                                st.plotly_chart(fig_sh, use_container_width=True)
+                        except Exception:
+                            pass
+
+        if load_ann and symbol_guess:
+            with st.spinner(f"Fetching BSE announcements for {symbol_guess}…"):
+                bse_code = get_bse_code(symbol_guess)
+                if bse_code:
+                    ann_df = fetch_bse_announcements(bse_code, ann_days)
+                    if ann_df.empty:
+                        st.info("No announcements found for this period.")
+                    else:
+                        st.markdown(f"**{len(ann_df)} announcements (last {ann_days} days)**")
+                        for _, row in ann_df.head(20).iterrows():
+                            st.markdown(
+                                f"<div style='background:#1e293b;border-radius:8px;padding:10px 14px;"
+                                f"margin-bottom:6px'>"
+                                f"<span style='color:#64748b;font-size:0.78rem'>{row.get('Date','')} · "
+                                f"{row.get('Category','')}</span><br>"
+                                f"<span style='color:#e2e8f0;font-size:0.88rem'>{row.get('Headline','')}</span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                else:
+                    st.warning(f"Could not find BSE code for {symbol_guess}. Try loading the Angel Broking token map first.")
+
+        if not load_btn and not load_ann:
+            st.markdown(
+                "<div style='text-align:center;color:#475569;padding:60px 0'>"
+                "Search for a company on the left to load detailed financials from Screener.in"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+
+# ── TAB 7: Heatmap ────────────────────────────────────────────────────────────
+with tab7:
     st.markdown("#### Market Cap Heatmap — hover any tile for aggregated or per-stock stats")
 
     hm_data = filtered[filtered["Mkt Cap (₹Cr)"] > 0].copy()
