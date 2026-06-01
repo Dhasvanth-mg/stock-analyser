@@ -215,14 +215,20 @@ with col_left:
         # Intraday (1D/1W) → area line; multi-day → candlestick
         if period_sel in ("1D", "1W"):
             cc_line = "#10b981" if c50 >= 0 else "#ef4444"
-            _lo = df_n50["Close"].min(); _hi = df_n50["Close"].max()
-            _pad = (_hi - _lo) * 0.15 or _lo * 0.002
+            _lo  = df_n50["Close"].min(); _hi = df_n50["Close"].max()
+            _pad = max((_hi - _lo) * 0.2, _lo * 0.001)
+            _fc  = f"rgba({'16,185,129' if c50>=0 else '239,68,68'},.07)"
+            # Invisible baseline
+            fig.add_trace(go.Scatter(
+                x=df_n50.index, y=[_lo - _pad * 0.5] * len(df_n50),
+                mode="lines", line=dict(width=0, color="rgba(0,0,0,0)"),
+                showlegend=False, hoverinfo="skip",
+            ))
             fig.add_trace(go.Scatter(
                 x=df_n50.index, y=df_n50["Close"], mode="lines",
                 name="NIFTY 50", line=dict(color=cc_line, width=2),
-                fill="toself",
-                fillcolor=f"rgba({'16,185,129' if c50>=0 else '239,68,68'},.06)",
-                hovertemplate="%{x}<br><b>%{y:,.2f}</b><extra></extra>",
+                fill="tonexty", fillcolor=_fc,
+                hovertemplate="<b>%{y:,.2f}</b><br>%{x}<extra></extra>",
             ))
         else:
             fig.add_trace(go.Candlestick(
@@ -247,7 +253,9 @@ with col_left:
             xaxis=dict(gridcolor="#0d1e30", zerolinecolor="#0d1e30"),
             yaxis=_yaxis_cfg,
             legend=dict(orientation="h", y=1.04, font=dict(size=10)),
-            hoverlabel=dict(bgcolor="#0d1e30", bordercolor="#1e3450", font_size=12),
+            hovermode="x unified",
+            hoverlabel=dict(bgcolor="#0d1e30", bordercolor="#1e3450",
+                            font=dict(size=12, color="#e2e8f0")),
             annotations=[dict(
                 x=0.01, y=0.97, xref="paper", yref="paper",
                 text=f"<b>{p50:,.2f}</b>  "
@@ -268,18 +276,29 @@ with col_left:
     def _spark(df, chg):
         is_up = chg >= 0
         color = "#10b981" if is_up else "#ef4444"
-        fill  = "rgba(16,185,129,.08)" if is_up else "rgba(239,68,68,.08)"
+        fill  = "rgba(16,185,129,.10)" if is_up else "rgba(239,68,68,.10)"
         fig2  = go.Figure()
         y_range = None
         if not df.empty:
-            lo = df["Close"].min(); hi = df["Close"].max()
-            pad = (hi - lo) * 0.2 or lo * 0.002
+            lo  = df["Close"].min()
+            hi  = df["Close"].max()
+            pad = max((hi - lo) * 0.25, lo * 0.001)
             y_range = [lo - pad, hi + pad]
+            # Invisible baseline so fill stays near the data, not going to 0
             fig2.add_trace(go.Scatter(
-                x=df.index, y=df["Close"], mode="lines",
-                line=dict(color=color, width=1.6),
-                fill="toself", fillcolor=fill,
-                hovertemplate="%{x|%H:%M}  %{y:,.2f}<extra></extra>",
+                x=df.index, y=[lo - pad * 0.5] * len(df),
+                mode="lines", line=dict(width=0, color="rgba(0,0,0,0)"),
+                showlegend=False, hoverinfo="skip",
+            ))
+            # Actual price line — fills to the baseline above
+            fig2.add_trace(go.Scatter(
+                x=df.index, y=df["Close"],
+                mode="lines",
+                line=dict(color=color, width=1.8),
+                fill="tonexty", fillcolor=fill,
+                showlegend=False,
+                name="",
+                hovertemplate="<b>%{y:,.2f}</b><br>%{x}<extra></extra>",
             ))
         fig2.update_layout(
             paper_bgcolor="#0d1e30", plot_bgcolor="#0d1e30",
@@ -293,7 +312,9 @@ with col_left:
                        tickformat=",.0f", showline=False,
                        range=y_range),
             showlegend=False,
-            hoverlabel=dict(bgcolor="#0d1e30", font_size=10),
+            hoverlabel=dict(bgcolor="#0d1e30", bordercolor="#1e3450",
+                            font=dict(size=11, color="#e2e8f0")),
+            hovermode="x unified",
         )
         return fig2
 
