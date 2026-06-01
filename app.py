@@ -216,71 +216,6 @@ st.markdown("")
 # ── Main layout: Chart+Intraday (left) | Movers (right) ──────────────────────
 col_left, col_right = st.columns([3, 1], gap="medium")
 
-with col_right:
-    # ── Watchlist ──────────────────────────────────────────────────────────
-    wl = st.session_state["watchlist"]
-    _wh1, _wh2 = st.columns([2, 1])
-    _wh1.markdown('<div class="section-hd">⭐ Watchlist</div>', unsafe_allow_html=True)
-
-    # Add / remove input
-    with _wh2.popover("✏️ Edit", use_container_width=True):
-        st.markdown("**Add stock** (NSE symbol)")
-        _new = st.text_input("", placeholder="e.g. WIPRO", key="wl_add",
-                              label_visibility="collapsed").upper().strip()
-        if st.button("➕ Add", use_container_width=True) and _new:
-            if _new not in wl and len(wl) < 4:
-                st.session_state["watchlist"].append(_new)
-                st.cache_data.clear(); st.rerun()
-            elif len(wl) >= 4:
-                st.warning("Max 4 stocks")
-        st.markdown("**Remove**")
-        for _s in list(wl):
-            if st.button(f"✕ {_s}", key=f"rm_{_s}", use_container_width=True):
-                st.session_state["watchlist"].remove(_s)
-                st.rerun()
-
-    for _sym in wl:
-        _d = _wl_quote(_sym)
-        _cc = "#10b981" if _d["chg"] >= 0 else "#ef4444"
-        _ar = "▲" if _d["chg"] >= 0 else "▼"
-        st.markdown(
-            f"<div style='background:#0d1e30;border:1px solid #1e3450;border-radius:9px;"
-            f"padding:8px 12px;margin-bottom:5px'>"
-            f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-            f"<div><div style='font-size:.9rem;font-weight:700;color:#e2e8f0'>{_d['sym']}</div>"
-            f"<div style='font-size:.68rem;color:#64748b'>{_d['name']}</div></div>"
-            f"<div style='text-align:right'>"
-            f"<div style='font-size:.9rem;font-weight:700;color:#e2e8f0'>₹{_d['price']:,.0f}</div>"
-            f"<div style='font-size:.75rem;font-weight:700;color:{_cc}'>{_ar}{abs(_d['chg']):.2f}%</div>"
-            f"</div></div>",
-            unsafe_allow_html=True)
-        if not _d["hist"].empty:
-            _lo = _d["hist"]["Close"].min(); _hi = _d["hist"]["Close"].max()
-            _pd = max((_hi-_lo)*.3, _lo*.001)
-            _fc = "rgba(16,185,129,.07)" if _d["chg"]>=0 else "rgba(239,68,68,.07)"
-            _lc = "#10b981" if _d["chg"]>=0 else "#ef4444"
-            _fw = go.Figure()
-            _fw.add_trace(go.Scatter(
-                x=_d["hist"].index, y=[_lo-_pd*.5]*len(_d["hist"]),
-                mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
-            _fw.add_trace(go.Scatter(
-                x=_d["hist"].index, y=_d["hist"]["Close"], mode="lines",
-                line=dict(color=_lc, width=1.4), fill="tonexty", fillcolor=_fc,
-                showlegend=False, name="",
-                hovertemplate="<b>%{y:,.2f}</b> %{x}<extra></extra>"))
-            _fw.update_layout(
-                paper_bgcolor="#0d1e30", plot_bgcolor="#0d1e30",
-                height=60, margin=dict(l=0,r=0,t=0,b=0),
-                xaxis=dict(visible=False), yaxis=dict(visible=False,range=[_lo-_pd,_hi+_pd]),
-                showlegend=False, hovermode="x unified",
-                hoverlabel=dict(bgcolor="#0d1e30", font=dict(size=10, color="#e2e8f0")))
-            st.plotly_chart(_fw, use_container_width=True,
-                            config={"displayModeBar": False})
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="section-hd" style="margin-top:8px">Biggest Movers · NIFTY 50</div>',
-                unsafe_allow_html=True)
-
 with col_left:
     # Section heading + period picker inline
     _ph1, _ph2 = st.columns([3, 1])
@@ -431,7 +366,66 @@ with col_left:
                         "justify-content:center;color:#1e3450;font-size:.72rem'>"
                         "No intraday data</div>", unsafe_allow_html=True)
 
-# ── Movers — injected into col_right (already opened above) ──────────────────
+    # ── Watchlist — below intraday charts ─────────────────────────────────
+    wl = st.session_state["watchlist"]
+    _wh1, _wh2 = st.columns([2, 1])
+    _wh1.markdown('<div class="section-hd">⭐ Watchlist</div>', unsafe_allow_html=True)
+    with _wh2.popover("✏️ Edit", use_container_width=True):
+        st.markdown("**Add stock (NSE symbol)**")
+        _new = st.text_input("", placeholder="e.g. WIPRO", key="wl_add",
+                              label_visibility="collapsed").upper().strip()
+        if st.button("➕ Add", use_container_width=True) and _new:
+            if _new not in wl and len(wl) < 4:
+                st.session_state["watchlist"].append(_new)
+                st.cache_data.clear(); st.rerun()
+            elif len(wl) >= 4:
+                st.warning("Max 4 stocks")
+        if wl:
+            st.markdown("**Remove**")
+            for _s in list(wl):
+                if st.button(f"✕ {_s}", key=f"rm_{_s}", use_container_width=True):
+                    st.session_state["watchlist"].remove(_s); st.rerun()
+
+    # 4 watchlist cards in a single row
+    _wl_cols = st.columns(4)
+    for i, _sym in enumerate(wl):
+        _d  = _wl_quote(_sym)
+        _cc = "#10b981" if _d["chg"] >= 0 else "#ef4444"
+        _ar = "▲" if _d["chg"] >= 0 else "▼"
+        with _wl_cols[i]:
+            st.markdown(
+                f"<div style='background:#0d1e30;border:1px solid #1e3450;"
+                f"border-radius:9px;padding:8px 10px'>"
+                f"<div style='font-size:.85rem;font-weight:700;color:#e2e8f0'>{_d['sym']}</div>"
+                f"<div style='font-size:.65rem;color:#64748b;margin-bottom:3px'>{_d['name']}</div>"
+                f"<div style='font-size:.9rem;font-weight:700;color:#e2e8f0'>₹{_d['price']:,.0f}</div>"
+                f"<div style='font-size:.75rem;font-weight:700;color:{_cc}'>{_ar}{abs(_d['chg']):.2f}%</div>"
+                f"</div>", unsafe_allow_html=True)
+            if not _d["hist"].empty:
+                _lo = _d["hist"]["Close"].min(); _hi = _d["hist"]["Close"].max()
+                _pd = max((_hi-_lo)*.3, _lo*.001)
+                _fw = go.Figure()
+                _fw.add_trace(go.Scatter(
+                    x=_d["hist"].index, y=[_lo-_pd*.5]*len(_d["hist"]),
+                    mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"))
+                _lc = "#10b981" if _d["chg"]>=0 else "#ef4444"
+                _fw.add_trace(go.Scatter(
+                    x=_d["hist"].index, y=_d["hist"]["Close"], mode="lines",
+                    line=dict(color=_lc, width=1.4),
+                    fill="tonexty", fillcolor=f"rgba({'16,185,129' if _d['chg']>=0 else '239,68,68'},.08)",
+                    showlegend=False, name="",
+                    hovertemplate="<b>%{y:,.2f}</b> %{x}<extra></extra>"))
+                _fw.update_layout(
+                    paper_bgcolor="#0d1e30", plot_bgcolor="#0d1e30",
+                    height=65, margin=dict(l=0,r=0,t=2,b=0),
+                    xaxis=dict(visible=False),
+                    yaxis=dict(visible=False, range=[_lo-_pd, _hi+_pd]),
+                    showlegend=False, hovermode="x unified",
+                    hoverlabel=dict(bgcolor="#0d1e30", font=dict(size=10, color="#e2e8f0")))
+                st.plotly_chart(_fw, use_container_width=True,
+                                config={"displayModeBar": False})
+
+# ── Movers (right column) ─────────────────────────────────────────────────────
 with col_right:
     from data_fetcher import fetch_stock_batch, get_all_symbols
     with st.spinner("Loading movers…"):
