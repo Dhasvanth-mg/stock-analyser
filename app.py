@@ -21,15 +21,22 @@ st.set_page_config(
 inject_css()
 st.markdown("""
 <style>
-/* ── Kill ALL the Streamlit chrome ──────────────────────── */
-.main .block-container        { padding-top:.3rem !important; }
-header[data-testid="stHeader"]{ display:none !important; }
-#MainMenu                     { display:none !important; }
-.stDeployButton               { display:none !important; }
-/* Sidebar + its toggle arrow */
-section[data-testid="stSidebar"]          { display:none !important; }
-[data-testid="collapsedControl"]          { display:none !important; }
-button[data-testid="stBaseButton-minimal"]{ display:none !important; }
+/* ── Kill ALL Streamlit chrome + dead space ─────────────── */
+.main .block-container         { padding-top:.2rem !important; }
+header[data-testid="stHeader"] { display:none !important; }
+#MainMenu                      { display:none !important; }
+.stDeployButton                { display:none !important; }
+/* Sidebar + toggle arrow */
+section[data-testid="stSidebar"]           { display:none !important; }
+[data-testid="collapsedControl"]           { display:none !important; }
+button[data-testid="stBaseButton-minimal"] { display:none !important; }
+/* Status bar / spinner strip under header */
+[data-testid="stStatusWidget"]             { display:none !important; }
+.stAppViewBlockContainer > div:first-child > div[data-testid="stVerticalBlock"]
+  > div[style*="height: 0"]               { display:none !important; }
+/* Kill the thin progress bar Streamlit injects */
+.stApp > div:first-child                   { padding-top:0 !important; }
+iframe[title="streamlit_app_bar"]          { display:none !important; }
 
 /* ── Nav bar ────────────────────────────────────────────── */
 .nav-bar{display:flex;gap:5px;background:#0d1e30;border:1px solid #1e3450;
@@ -187,11 +194,14 @@ st.markdown("")
 col_left, col_right = st.columns([3, 1], gap="medium")
 
 with col_left:
-    # Period selector
-    st.markdown('<div class="section-hd">NIFTY 50</div>', unsafe_allow_html=True)
-    period_sel = st.radio("", list(PERIOD_MAP.keys()), index=2,
-                          horizontal=True, key="nifty_period",
-                          label_visibility="collapsed")
+    # Section heading + period picker inline
+    _ph1, _ph2 = st.columns([3, 1])
+    _ph1.markdown('<div class="section-hd" style="margin-top:6px">NIFTY 50</div>',
+                  unsafe_allow_html=True)
+    period_sel = _ph2.selectbox(
+        "Period", list(PERIOD_MAP.keys()), index=2,
+        key="nifty_period", label_visibility="collapsed"
+    )
     yf_period, yf_interval = PERIOD_MAP[period_sel]
 
     df_n50 = _nifty50(yf_period, yf_interval)

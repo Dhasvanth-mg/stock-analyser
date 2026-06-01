@@ -18,20 +18,21 @@ CSS = """
 .main .block-container{padding:.6rem 1.4rem 2rem;max-width:1600px}
 .stApp{background:var(--bg)}
 
-/* Header */
+/* Header — compact */
 .nse-header{display:flex;align-items:center;justify-content:space-between;
   background:linear-gradient(120deg,#0d1e30 0%,#0f2640 60%,#0d1e30 100%);
-  border:1px solid var(--border);border-radius:14px;padding:.9rem 1.5rem;margin-bottom:.8rem}
-.nse-header h1{margin:0;font-size:1.45rem;font-weight:800;
+  border:1px solid var(--border);border-radius:11px;
+  padding:.55rem 1.2rem;margin-bottom:.5rem}
+.nse-header h1{margin:0;font-size:1.2rem;font-weight:800;
   background:linear-gradient(90deg,#60a5fa,#34d399);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.nse-header p{margin:2px 0 0;font-size:.78rem;color:var(--muted)}
-.mkt-badge{display:flex;align-items:center;gap:6px;background:var(--bg-raised);
-  border:1px solid var(--border);border-radius:8px;padding:5px 11px;
-  font-size:.76rem;color:var(--soft)}
-.dot-open{width:7px;height:7px;border-radius:50%;background:var(--green);
-  box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
-.dot-closed{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.nse-header p{margin:1px 0 0;font-size:.72rem;color:var(--muted)}
+.mkt-badge{display:flex;align-items:center;gap:5px;background:var(--bg-raised);
+  border:1px solid var(--border);border-radius:7px;padding:4px 9px;
+  font-size:.72rem;color:var(--soft)}
+.dot-open{width:6px;height:6px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 5px var(--green);animation:pulse 2s infinite}
+.dot-closed{width:6px;height:6px;border-radius:50%;background:var(--muted)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* Cap pills */
@@ -131,13 +132,15 @@ section[data-testid="stSidebar"] h3{font-size:.7rem;color:var(--muted);
 ::-webkit-scrollbar-thumb:hover{background:var(--blue)}
 
 /* ── Hide Streamlit chrome on all pages ── */
-.main .block-container        { padding-top:.35rem !important; }
-header[data-testid="stHeader"]{ display:none !important; }
-#MainMenu                     { display:none !important; }
-.stDeployButton               { display:none !important; }
-section[data-testid="stSidebar"]          { display:none !important; }
-[data-testid="collapsedControl"]          { display:none !important; }
-button[data-testid="stBaseButton-minimal"]{ display:none !important; }
+.main .block-container         { padding-top:.2rem !important; }
+header[data-testid="stHeader"] { display:none !important; }
+#MainMenu                      { display:none !important; }
+.stDeployButton                { display:none !important; }
+section[data-testid="stSidebar"]           { display:none !important; }
+[data-testid="collapsedControl"]           { display:none !important; }
+button[data-testid="stBaseButton-minimal"] { display:none !important; }
+[data-testid="stStatusWidget"]             { display:none !important; }
+.stApp > div:first-child                   { padding-top:0 !important; }
 
 /* ── Nav bar (shared across pages) ── */
 .nav-bar{display:flex;gap:5px;background:#0d1e30;border:1px solid #1e3450;
