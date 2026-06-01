@@ -858,18 +858,18 @@ with tab6:
             labels.append(cap)
             parents.append("")
             values.append(cap_df["Mkt Cap (₹Cr)"].sum())
-            colors.append(cap_df["Change %"].mean())
+            colors.append(None)                          # Plotly averages from children
             customdata.append(_agg_hover(cap_df, cap))
 
             for sector in cap_df["Sector"].unique():
-                sec_df  = cap_df[cap_df["Sector"] == sector]
-                sec_id  = f"{cap}|{sector}"
+                sec_df = cap_df[cap_df["Sector"] == sector]
+                sec_id = f"{cap}|{sector}"
 
                 ids.append(sec_id)
                 labels.append(sector)
                 parents.append(cap)
                 values.append(sec_df["Mkt Cap (₹Cr)"].sum())
-                colors.append(sec_df["Change %"].mean())
+                colors.append(None)                      # Plotly averages from children
                 customdata.append(_agg_hover(sec_df, sector))
 
                 for _, stk in sec_df.iterrows():
@@ -878,7 +878,7 @@ with tab6:
                     labels.append(stk["Symbol"])
                     parents.append(sec_id)
                     values.append(stk["Mkt Cap (₹Cr)"])
-                    colors.append(stk["Change %"])
+                    colors.append(stk["Change %"])       # leaf: actual daily change
                     customdata.append([
                         stk["Name"],
                         f"₹{stk['Mkt Cap (₹Cr)']:,.0f} Cr",
@@ -893,11 +893,6 @@ with tab6:
                         f"₹{stk['Price (₹)']:,.2f}",
                     ])
 
-        # Normalise colors to 0–1 for the colorscale
-        all_c  = [c for c in colors if c is not None]
-        c_min, c_max = min(all_c), max(all_c)
-        c_range = (c_max - c_min) or 1
-
         fig3 = go.Figure(go.Treemap(
             ids=ids,
             labels=labels,
@@ -908,12 +903,10 @@ with tab6:
                 colors=colors,
                 colorscale=[
                     [0,   "#ef4444"],
-                    [0.5, "#1e3a5f"],
+                    [0.5, "#1e293b"],
                     [1,   "#22c55e"],
                 ],
                 cmid=0,
-                cmin=c_min,
-                cmax=c_max,
                 showscale=True,
                 colorbar=dict(
                     title="Change %",
