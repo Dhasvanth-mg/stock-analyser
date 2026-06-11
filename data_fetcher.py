@@ -6,6 +6,7 @@ NSE Stock Data Fetcher
 """
 
 import io
+import time
 import requests
 import yfinance as yf
 import pandas as pd
@@ -36,7 +37,7 @@ def _yf_session():
 def _bulk_quote(symbols: list[str]) -> dict:
     """
     Fetch quote data for all symbols via Yahoo Finance v7 batch API.
-    ~5 requests for 500 stocks vs 500 individual ticker.info calls.
+    Uses 50-stock batches with retry + inter-batch delay to avoid cloud rate limiting.
     Returns {SYMBOL.NS: quote_dict}.
     """
     session, crumb = _yf_session()
@@ -46,8 +47,8 @@ def _bulk_quote(symbols: list[str]) -> dict:
     results = {}
     tickers = [f"{s}.NS" for s in symbols]
 
-    for i in range(0, len(tickers), 100):
-        batch = tickers[i : i + 100]
+    for i in range(0, len(tickers), 50):
+        batch = tickers[i : i + 50]
         params = {
             "symbols":    ",".join(batch),
             "formatted":  "false",
@@ -55,15 +56,22 @@ def _bulk_quote(symbols: list[str]) -> dict:
         }
         if crumb:
             params["crumb"] = crumb
-        try:
-            r = session.get(
-                "https://query2.finance.yahoo.com/v7/finance/quote",
-                params=params, timeout=25,
-            )
-            for q in r.json().get("quoteResponse", {}).get("result", []):
-                results[q.get("symbol", "")] = q
-        except Exception:
-            continue
+
+        for attempt in range(2):  # retry once on failure
+            try:
+                r = session.get(
+                    "https://query2.finance.yahoo.com/v7/finance/quote",
+                    params=params, timeout=30,
+                )
+                for q in r.json().get("quoteResponse", {}).get("result", []):
+                    results[q.get("symbol", "")] = q
+                break  # success — no retry needed
+            except Exception:
+                if attempt == 0:
+                    time.sleep(0.5)  # brief pause before retry
+
+        if i + 50 < len(tickers):
+            time.sleep(0.15)  # rate-limit buffer between batches
 
     return results
 
