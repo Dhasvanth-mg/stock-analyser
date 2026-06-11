@@ -16,7 +16,7 @@ render_nav("pages/1_Screener.py")
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "cap_filter" not in st.session_state:
-    st.session_state["cap_filter"] = "Blue Chip"
+    st.session_state["cap_filter"] = "All"
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -24,19 +24,17 @@ with st.sidebar:
     sector_ph = st.empty()
     st.markdown("### PRICE (₹)")
     price_range = st.slider("Price", 0, 50000, (0, 50000), step=100, label_visibility="collapsed")
-    st.markdown("### REVENUE (₹ Cr)")
-    rev_range = st.slider("Revenue", 0, 500000, (0, 500000), step=1000, label_visibility="collapsed")
     st.markdown("### MARKET CAP (₹ Cr)")
     mc_range = st.slider("MktCap", 0, 2000000, (0, 2000000), step=5000, label_visibility="collapsed")
     st.markdown("### P/E RATIO")
     pe_range = st.slider("PE", 0.0, 200.0, (0.0, 200.0), step=1.0, label_visibility="collapsed")
     st.markdown("### DISPLAY")
-    sort_col = st.selectbox("Sort by", ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "Revenue (₹Cr)", "P/E", "EPS"])
+    sort_col = st.selectbox("Sort by", ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "P/E", "EPS", "Div Yield %"])
     sort_asc = st.checkbox("Ascending", value=False)
-    max_rows = st.slider("Max rows", 10, 500, 50, step=10)
+    max_rows = st.slider("Max rows", 10, 504, 100, step=10)
     st.markdown("---")
     if st.button("🔄 Refresh", use_container_width=True):
-        st.cache_data.clear(); st.rerun()
+        st.cache_data.clear(); st.cache_resource.clear(); st.rerun()
 
 # ── Cap filter pills ──────────────────────────────────────────────────────────
 _CAPS  = ["All", "Blue Chip", "Large Cap", "Mid Cap", "Small Cap"]
@@ -54,9 +52,8 @@ cap_filter = st.session_state["cap_filter"]
 
 # ── Load + filter ─────────────────────────────────────────────────────────────
 symbols = get_all_symbols(cap_filter)
-_prog = st.progress(0, text=f"Loading {len(symbols)} stocks…")
-df = fetch_stock_batch(symbols)
-_prog.empty()
+with st.spinner(f"Loading {len(symbols)} stocks…"):
+    df = fetch_stock_batch(symbols)
 
 if df.empty:
     st.error("No data. Check connection."); st.stop()
@@ -66,7 +63,6 @@ selected_sectors = sector_ph.multiselect("Sectors", all_sectors, default=all_sec
 
 mask = (
     df["Price (₹)"].between(*price_range) &
-    df["Revenue (₹Cr)"].between(*rev_range) &
     df["Mkt Cap (₹Cr)"].between(*mc_range) &
     df["P/E"].between(*pe_range) &
     df["Sector"].isin(selected_sectors)
@@ -121,8 +117,10 @@ st.markdown(f'<div class="section-hd">{len(filtered)} stocks · sorted by {sort_
             unsafe_allow_html=True)
 
 display_cols = ["Symbol","Name","Cap Category","Sector","Price (₹)","Change %",
-                "Mkt Cap (₹Cr)","Revenue (₹Cr)","P/E","P/B","EPS","Div Yield %",
+                "Mkt Cap (₹Cr)","P/E","P/B","EPS","Div Yield %",
                 "Beta","52W High","52W Low","Volume"]
+# Only keep cols that exist (Revenue removed — not in batch API)
+display_cols = [c for c in display_cols if c in filtered.columns]
 disp = filtered[display_cols].reset_index(drop=True)
 
 def _chg(v):
@@ -138,16 +136,16 @@ def _cap(v):
             }.get(v, "")
 
 _fmt = {"Price (₹)":"₹{:.2f}","Change %":"{:+.2f}%",
-        "Mkt Cap (₹Cr)":"₹{:,.0f}","Revenue (₹Cr)":"₹{:,.0f}",
+        "Mkt Cap (₹Cr)":"₹{:,.0f}",
         "P/E":"{:.1f}","P/B":"{:.2f}","EPS":"₹{:.2f}",
         "Div Yield %":"{:.2f}%","52W High":"₹{:.2f}",
         "52W Low":"₹{:.2f}","Volume":"{:,}"}
+_fmt = {k: v for k, v in _fmt.items() if k in disp.columns}
 _s = disp.style.format(_fmt).set_properties(**{"background-color":"#07111d","color":"#e2e8f0"})
-# pandas ≥2.1 renamed applymap → map; support both
 _cell = "map" if hasattr(_s, "map") else "applymap"
 styled = getattr(_s, _cell)(_chg, subset=["Change %"])
 styled = getattr(styled, _cell)(_cap, subset=["Cap Category"])
 
-st.dataframe(styled, use_container_width=True, height=540)
+st.dataframe(styled, use_container_width=True, height=600)
 st.download_button("⬇️ Export CSV", disp.to_csv(index=False), "nse_stocks.csv", "text/csv")
 

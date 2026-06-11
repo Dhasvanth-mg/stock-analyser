@@ -1,7 +1,7 @@
 """
 NSE Stock Data Fetcher
-- Live NIFTY 500 constituent lists from NSE archives (Blue Chip / Large Cap / Mid Cap / Small Cap)
-- Parallel yfinance fetching via ThreadPoolExecutor
+- Live NIFTY 500 constituent lists from NSE archives
+- Batch quote fetching via Yahoo Finance v7 API (~5 requests for 500 stocks)
 - Streamlit cache: index lists 24h, prices 15min
 """
 
@@ -12,6 +12,60 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ── Yahoo Finance batch quote session (curl_cffi for browser impersonation) ────
+
+@st.cache_resource
+def _yf_session():
+    """
+    Shared curl_cffi session + crumb for Yahoo Finance v7 API.
+    Visiting finance.yahoo.com first sets the required cookies.
+    """
+    try:
+        from curl_cffi import requests as cffi
+        s = cffi.Session(impersonate="chrome120")
+        s.get("https://finance.yahoo.com/", timeout=15)
+        crumb = s.get(
+            "https://query2.finance.yahoo.com/v1/test/getcrumb", timeout=10
+        ).text.strip()
+        return s, crumb
+    except Exception:
+        return None, ""
+
+
+def _bulk_quote(symbols: list[str]) -> dict:
+    """
+    Fetch quote data for all symbols via Yahoo Finance v7 batch API.
+    ~5 requests for 500 stocks vs 500 individual ticker.info calls.
+    Returns {SYMBOL.NS: quote_dict}.
+    """
+    session, crumb = _yf_session()
+    if not session:
+        return {}
+
+    results = {}
+    tickers = [f"{s}.NS" for s in symbols]
+
+    for i in range(0, len(tickers), 100):
+        batch = tickers[i : i + 100]
+        params = {
+            "symbols":    ",".join(batch),
+            "formatted":  "false",
+            "corsDomain": "finance.yahoo.com",
+        }
+        if crumb:
+            params["crumb"] = crumb
+        try:
+            r = session.get(
+                "https://query2.finance.yahoo.com/v7/finance/quote",
+                params=params, timeout=25,
+            )
+            for q in r.json().get("quoteResponse", {}).get("result", []):
+                results[q.get("symbol", "")] = q
+        except Exception:
+            continue
+
+    return results
 
 # ── NSE archive headers (required to avoid 403) ───────────────────────────────
 _NSE_HEADERS = {
@@ -213,10 +267,47 @@ def _fetch_one(sym: str, cap_labels: dict, sector_map: dict) -> dict | None:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
-    """Parallel fetch using ThreadPoolExecutor. No Streamlit UI calls inside."""
+    """
+    Fetch all symbols via Yahoo Finance v7 batch API (fast path: ~5 requests).
+    Falls back to per-ticker ThreadPoolExecutor if batch API is unavailable.
+    """
     cap_labels, sector_map = load_universe()
-    rows = []
 
+    quotes = _bulk_quote(symbols)
+
+    if quotes:
+        rows = []
+        for sym in symbols:
+            q = quotes.get(f"{sym}.NS", {})
+            price = q.get("regularMarketPrice") or 0
+            if not price:
+                continue
+            rows.append({
+                "Symbol":        sym,
+                "Name":          q.get("longName") or q.get("shortName") or sym,
+                "Sector":        sector_map.get(sym) or q.get("sectorDisp") or "—",
+                "Cap Category":  cap_labels.get(sym, "Small Cap"),
+                "Price (₹)":     round(price, 2),
+                "Change %":      round(q.get("regularMarketChangePercent") or 0, 2),
+                "Day High":      round(q.get("regularMarketDayHigh") or price, 2),
+                "Day Low":       round(q.get("regularMarketDayLow") or price, 2),
+                "52W High":      round(q.get("fiftyTwoWeekHigh") or 0, 2),
+                "52W Low":       round(q.get("fiftyTwoWeekLow") or 0, 2),
+                "Volume":        int(q.get("regularMarketVolume") or 0),
+                "Mkt Cap (₹Cr)": round((q.get("marketCap") or 0) / 1e7, 1),
+                "Revenue (₹Cr)": 0,
+                "Net Inc (₹Cr)": 0,
+                "P/E":           round(q.get("trailingPE") or 0, 2),
+                "P/B":           round(q.get("priceToBook") or 0, 2),
+                "EPS":           round(q.get("epsTrailingTwelveMonths") or 0, 2),
+                "Div Yield %":   round((q.get("trailingAnnualDividendYield") or 0) * 100, 2),
+                "Beta":          round(q.get("beta") or 0, 2),
+            })
+        if rows:
+            return pd.DataFrame(rows)
+
+    # Fallback: per-ticker ThreadPoolExecutor (slower but works if v7 API is down)
+    rows = []
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(_fetch_one, sym, cap_labels, sector_map): sym
                    for sym in symbols}
