@@ -16,7 +16,7 @@ render_nav("pages/1_Screener.py")
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "cap_filter" not in st.session_state:
-    st.session_state["cap_filter"] = "All"
+    st.session_state["cap_filter"] = "Blue Chip"
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -137,15 +137,16 @@ def _cap(v):
             "Small Cap": "background:rgba(239,68,68,.12);color:#f87171",
             }.get(v, "")
 
-styled = (disp.style
-          .applymap(_chg, subset=["Change %"])
-          .applymap(_cap, subset=["Cap Category"])
-          .format({"Price (₹)":"₹{:.2f}","Change %":"{:+.2f}%",
-                   "Mkt Cap (₹Cr)":"₹{:,.0f}","Revenue (₹Cr)":"₹{:,.0f}",
-                   "P/E":"{:.1f}","P/B":"{:.2f}","EPS":"₹{:.2f}",
-                   "Div Yield %":"{:.2f}%","52W High":"₹{:.2f}",
-                   "52W Low":"₹{:.2f}","Volume":"{:,}"})
-          .set_properties(**{"background-color":"#07111d","color":"#e2e8f0"}))
+_fmt = {"Price (₹)":"₹{:.2f}","Change %":"{:+.2f}%",
+        "Mkt Cap (₹Cr)":"₹{:,.0f}","Revenue (₹Cr)":"₹{:,.0f}",
+        "P/E":"{:.1f}","P/B":"{:.2f}","EPS":"₹{:.2f}",
+        "Div Yield %":"{:.2f}%","52W High":"₹{:.2f}",
+        "52W Low":"₹{:.2f}","Volume":"{:,}"}
+_s = disp.style.format(_fmt).set_properties(**{"background-color":"#07111d","color":"#e2e8f0"})
+# pandas ≥2.1 renamed applymap → map; support both
+_cell = "map" if hasattr(_s, "map") else "applymap"
+styled = getattr(_s, _cell)(_chg, subset=["Change %"])
+styled = getattr(styled, _cell)(_cap, subset=["Cap Category"])
 
 st.dataframe(styled, use_container_width=True, height=540)
 st.download_button("⬇️ Export CSV", disp.to_csv(index=False), "nse_stocks.csv", "text/csv")

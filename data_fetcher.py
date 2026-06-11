@@ -244,7 +244,7 @@ def resolve_and_fetch_history(symbol: str, period: str = "6mo") -> tuple[pd.Data
     candidates = [
         f"{sym}.NS",                        # NSE first
         f"{sym}.BO",                        # BSE fallback
-        f"{sym.replace('-','')}  .NS",      # strip hyphens
+        f"{sym.replace('-','')}.NS",           # strip hyphens
         f"{sym.replace(' ','')}.NS",        # strip spaces
     ]
     for ticker_str in candidates:

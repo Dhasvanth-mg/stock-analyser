@@ -7,7 +7,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from utils import inject_css, render_header, _CHART_BG
+from utils import inject_css, render_header, render_nav, _CHART_BG
+from user_data import load_watchlist, save_watchlist
 
 load_dotenv()
 
@@ -84,26 +85,7 @@ div[data-testid="stRadio"] p{display:none}
 
 render_header("📈 NSE Stock Analyser", "Live dashboard · AI-powered · NSE · BSE")
 
-# ── Nav bar (replaces sidebar) ────────────────────────────────────────────────
-_PAGES = [
-    ("🏠 Dashboard",   None),
-    ("📋 Screener",    "pages/1_Screener.py"),
-    ("🤖 AI Analysis", "pages/2_AI_Analysis.py"),
-    ("⚖️ Compare",     "pages/3_Compare.py"),
-    ("📰 News",        "pages/4_News.py"),
-    ("🔍 Deep Search", "pages/6_Deep_Search.py"),
-    ("🗂️ Heatmap",     "pages/5_Heatmap.py"),
-]
-st.markdown('<div class="nav-bar">', unsafe_allow_html=True)
-_nc = st.columns(len(_PAGES))
-for i, (label, path) in enumerate(_PAGES):
-    with _nc[i]:
-        st.markdown(f'<div class="{"nav-active" if not path else ""}">',
-                    unsafe_allow_html=True)
-        if st.button(label, key=f"nav_{i}", use_container_width=True):
-            if path: st.switch_page(path)
-        st.markdown('</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+render_nav("app.py")
 
 # ── Search bar ────────────────────────────────────────────────────────────────
 _s1, _s2 = st.columns([6, 1])
@@ -193,7 +175,7 @@ def _wl_quote(sym: str):
         return {"sym": sym, "name": sym, "price": 0, "chg": 0, "hist": pd.DataFrame()}
 
 if "watchlist" not in st.session_state:
-    st.session_state["watchlist"] = ["RELIANCE", "TCS", "HDFCBANK", "INFY"]
+    st.session_state["watchlist"] = load_watchlist()
 
 # ── Index strip ───────────────────────────────────────────────────────────────
 st.markdown('<div class="section-hd">Major Indices</div>', unsafe_allow_html=True)
@@ -201,14 +183,15 @@ _ic = st.columns(len(INDICES))
 for (name, ticker), col in zip(INDICES, _ic):
     p, chg = quotes[ticker]
     cc = "#10b981" if chg >= 0 else "#ef4444"
-    # Format large numbers compactly
     fp = (f"{p/1000:.1f}K" if p >= 10000 else f"{p:,.1f}") if p else "—"
+    chg_html = (f"{'▲' if chg>=0 else '▼'} {abs(chg):.2f}%") if p else "—"
+    chg_color = cc if p else "#64748b"
     with col:
         st.markdown(
             f"<div class='idx-card'>"
             f"<div class='idx-name'>{name}</div>"
             f"<div class='idx-val'>{fp}</div>"
-            f"<div class='idx-chg' style='color:{cc}'>{'▲' if chg>=0 else '▼'} {abs(chg):.2f}%</div>"
+            f"<div class='idx-chg' style='color:{chg_color}'>{chg_html}</div>"
             f"</div>", unsafe_allow_html=True)
 
 st.markdown("")
@@ -348,23 +331,26 @@ with col_left:
             p_i, chg_i = quotes.get(ticker, (0, 0))
             df_i = _intraday(ticker)
             cc_i = "#10b981" if chg_i >= 0 else "#ef4444"
+            price_str  = f"{p_i:,.2f}" if p_i else "—"
+            chg_str    = f"{'▲' if chg_i>=0 else '▼'}{abs(chg_i):.2f}%" if p_i else "—"
+            chg_color_i = cc_i if p_i else "#64748b"
             with col:
                 st.markdown(
                     f"<div class='idx-mini'>"
                     f"<div style='display:flex;justify-content:space-between'>"
                     f"<span style='font-size:.66rem;font-weight:700;color:#475569;text-transform:uppercase'>{name}</span>"
-                    f"<span style='font-size:.75rem;font-weight:700;color:{cc_i}'>{'▲' if chg_i>=0 else '▼'}{abs(chg_i):.2f}%</span>"
+                    f"<span style='font-size:.75rem;font-weight:700;color:{chg_color_i}'>{chg_str}</span>"
                     f"</div>"
-                    f"<div style='font-size:.85rem;font-weight:700;color:#e2e8f0'>{p_i:,.2f}</div>"
+                    f"<div style='font-size:.85rem;font-weight:700;color:#e2e8f0'>{price_str}</div>"
                     f"</div>", unsafe_allow_html=True)
-                if not df_i.empty:
+                if not df_i.empty and p_i:
                     st.plotly_chart(_spark(df_i, chg_i), use_container_width=True,
                                     config={"displayModeBar": False})
                 else:
                     st.markdown(
                         "<div style='height:70px;display:flex;align-items:center;"
                         "justify-content:center;color:#1e3450;font-size:.72rem'>"
-                        "No intraday data</div>", unsafe_allow_html=True)
+                        "No data</div>", unsafe_allow_html=True)
 
     # ── Watchlist — below intraday charts ─────────────────────────────────
     wl = st.session_state["watchlist"]
@@ -377,6 +363,7 @@ with col_left:
         if st.button("➕ Add", use_container_width=True) and _new:
             if _new not in wl and len(wl) < 4:
                 st.session_state["watchlist"].append(_new)
+                save_watchlist(st.session_state["watchlist"])
                 st.cache_data.clear(); st.rerun()
             elif len(wl) >= 4:
                 st.warning("Max 4 stocks")
@@ -384,7 +371,9 @@ with col_left:
             st.markdown("**Remove**")
             for _s in list(wl):
                 if st.button(f"✕ {_s}", key=f"rm_{_s}", use_container_width=True):
-                    st.session_state["watchlist"].remove(_s); st.rerun()
+                    st.session_state["watchlist"].remove(_s)
+                    save_watchlist(st.session_state["watchlist"])
+                    st.rerun()
 
     # 4 watchlist cards in a single row
     _wl_cols = st.columns(4)

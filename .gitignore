@@ -6,3 +6,5 @@ __pycache__/
 venv/
 *.egg-info/
 .streamlit/secrets.toml
+.gstack/
+user_data.json
