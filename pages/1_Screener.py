@@ -29,7 +29,7 @@ with st.sidebar:
     st.markdown("### P/E RATIO")
     pe_range = st.slider("PE", 0.0, 200.0, (0.0, 200.0), step=1.0, label_visibility="collapsed")
     st.markdown("### DISPLAY")
-    sort_col = st.selectbox("Sort by", ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "P/E", "EPS", "Div Yield %"])
+    sort_col = st.selectbox("Sort by", ["Mkt Cap (₹Cr)", "Price (₹)", "Change %", "P/E", "EPS", "Div Yield %", "Revenue (₹Cr)"])
     sort_asc = st.checkbox("Ascending", value=False)
     max_rows = st.slider("Max rows", 10, 504, 100, step=10)
     st.markdown("---")
@@ -117,9 +117,8 @@ st.markdown(f'<div class="section-hd">{len(filtered)} stocks · sorted by {sort_
             unsafe_allow_html=True)
 
 display_cols = ["Symbol","Name","Cap Category","Sector","Price (₹)","Change %",
-                "Mkt Cap (₹Cr)","P/E","P/B","EPS","Div Yield %",
+                "Mkt Cap (₹Cr)","Revenue (₹Cr)","P/E","P/B","EPS","Div Yield %",
                 "Beta","52W High","52W Low","Volume"]
-# Only keep cols that exist (Revenue removed — not in batch API)
 display_cols = [c for c in display_cols if c in filtered.columns]
 disp = filtered[display_cols].reset_index(drop=True)
 
@@ -136,7 +135,7 @@ def _cap(v):
             }.get(v, "")
 
 _fmt = {"Price (₹)":"₹{:.2f}","Change %":"{:+.2f}%",
-        "Mkt Cap (₹Cr)":"₹{:,.0f}",
+        "Mkt Cap (₹Cr)":"₹{:,.0f}","Revenue (₹Cr)":"₹{:,.0f}",
         "P/E":"{:.1f}","P/B":"{:.2f}","EPS":"₹{:.2f}",
         "Div Yield %":"{:.2f}%","52W High":"₹{:.2f}",
         "52W Low":"₹{:.2f}","Volume":"{:,}"}

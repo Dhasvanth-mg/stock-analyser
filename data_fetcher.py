@@ -1,7 +1,8 @@
 """
 NSE Stock Data Fetcher
 - Live NIFTY 500 constituent lists from NSE archives
-- Batch quote fetching via Yahoo Finance v7 API (~5 requests for 500 stocks)
+- Primary quotes: TradingView screener API (all NSE stocks, 1 request, no auth)
+- Fallbacks: Yahoo v7 batch → Yahoo spark (crumb-free) → per-ticker .info
 - Streamlit cache: index lists 24h, prices 15min
 """
 
@@ -99,6 +100,87 @@ _BROWSER_HEADERS = {
                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
 }
+
+# ── TradingView screener (primary bulk source — no auth, cloud-friendly) ──────
+
+_TV_COLUMNS = [
+    "name", "description", "close", "change", "high", "low",
+    "market_cap_basic", "price_earnings_ttm", "price_book_fq",
+    "earnings_per_share_basic_ttm", "dividends_yield", "beta_1_year",
+    "price_52_week_high", "price_52_week_low", "volume",
+    "sector", "total_revenue", "net_income",
+]
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _tv_scan_all() -> dict:
+    """
+    One POST to TradingView's screener API returns every NSE stock with
+    price + fundamentals. Returns {TV_NAME: {column: value}}.
+    TV names: hyphens become underscores (BAJAJ-AUTO → BAJAJ_AUTO), & kept.
+    """
+    payload = {
+        "filter": [
+            {"left": "exchange", "operation": "equal", "right": "NSE"},
+            {"left": "type",     "operation": "equal", "right": "stock"},
+        ],
+        "columns": _TV_COLUMNS,
+        "range": [0, 4500],
+    }
+    for attempt in range(2):
+        try:
+            r = requests.post(
+                "https://scanner.tradingview.com/india/scan",
+                json=payload, timeout=30,
+                headers={"User-Agent": _BROWSER_HEADERS["User-Agent"],
+                         "Referer": "https://www.tradingview.com/"},
+            )
+            r.raise_for_status()
+            out = {}
+            for row in r.json().get("data", []):
+                d = dict(zip(_TV_COLUMNS, row.get("d", [])))
+                name = str(d.get("name") or "")
+                if name:
+                    out[name] = d
+            if out:
+                return out
+        except Exception:
+            if attempt == 0:
+                time.sleep(1)
+    return {}
+
+
+def _tv_name(sym: str) -> str:
+    """NSE symbol → TradingView name (BAJAJ-AUTO → BAJAJ_AUTO; M&M stays)."""
+    return sym.replace("-", "_")
+
+
+def _tv_row(sym: str, d: dict, cap_labels: dict, sector_map: dict) -> dict | None:
+    """Map one TradingView result row to our standard stock dict."""
+    price = d.get("close") or 0
+    if not price:
+        return None
+    return {
+        "Symbol":        sym,
+        "Name":          d.get("description") or sym,
+        "Sector":        sector_map.get(sym) or d.get("sector") or "—",
+        "Cap Category":  cap_labels.get(sym, "Small Cap"),
+        "Price (₹)":     round(price, 2),
+        "Change %":      round(d.get("change") or 0, 2),
+        "Day High":      round(d.get("high") or price, 2),
+        "Day Low":       round(d.get("low") or price, 2),
+        "52W High":      round(d.get("price_52_week_high") or 0, 2),
+        "52W Low":       round(d.get("price_52_week_low") or 0, 2),
+        "Volume":        int(d.get("volume") or 0),
+        "Mkt Cap (₹Cr)": round((d.get("market_cap_basic") or 0) / 1e7, 1),
+        "Revenue (₹Cr)": round((d.get("total_revenue") or 0) / 1e7, 1),
+        "Net Inc (₹Cr)": round((d.get("net_income") or 0) / 1e7, 1),
+        "P/E":           round(d.get("price_earnings_ttm") or 0, 2),
+        "P/B":           round(d.get("price_book_fq") or 0, 2),
+        "EPS":           round(d.get("earnings_per_share_basic_ttm") or 0, 2),
+        "Div Yield %":   round(d.get("dividends_yield") or 0, 2),
+        "Beta":          round(d.get("beta_1_year") or 0, 2),
+    }
 
 
 def _spark_batch(tickers: list[str]) -> dict:
@@ -264,6 +346,8 @@ def load_universe() -> tuple[dict[str, str], dict[str, str]]:
 
     cap_labels: dict[str, str] = {}
     for sym in nifty500:
+        if sym.startswith("DUMMY"):
+            continue  # NSE placeholder rows for pending demergers
         if sym in nifty50_set:
             cap_labels[sym] = "Blue Chip"
         elif sym in nifty100_set:
@@ -337,10 +421,27 @@ def _fetch_one(sym: str, cap_labels: dict, sector_map: dict) -> dict | None:
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
     """
-    Fetch all symbols via Yahoo Finance v7 batch API (fast path: ~5 requests).
-    Falls back to per-ticker ThreadPoolExecutor if batch API is unavailable.
+    Fetch all symbols. Source order:
+    1. TradingView screener (1 request, full fundamentals, cloud-friendly)
+    2. Yahoo v7 batch (needs valid crumb)
+    3. Yahoo spark (crumb-free, price/change only)
+    4. Per-ticker .info ThreadPool (probe-gated)
     """
     cap_labels, sector_map = load_universe()
+
+    # Primary: TradingView — one cached scan covers every cap filter
+    tv = _tv_scan_all()
+    if tv:
+        rows = []
+        for sym in symbols:
+            d = tv.get(_tv_name(sym))
+            if d:
+                row = _tv_row(sym, d, cap_labels, sector_map)
+                if row:
+                    rows.append(row)
+        # Accept only if coverage is decent; otherwise let Yahoo take over
+        if rows and len(rows) >= 0.6 * len(symbols):
+            return pd.DataFrame(rows)
 
     quotes = _bulk_quote(symbols)
 
@@ -436,9 +537,15 @@ def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_single_stock(symbol: str) -> dict | None:
-    """Fetch live data for one symbol — used by Deep Search. v7 batch first."""
+    """Fetch live data for one symbol — used by Deep Search. TV first."""
     cap_labels, sector_map = load_universe()
     sym = symbol.upper()
+
+    d = _tv_scan_all().get(_tv_name(sym))
+    if d:
+        row = _tv_row(sym, d, cap_labels, sector_map)
+        if row:
+            return row
 
     q = _bulk_quote([sym]).get(f"{sym}.NS")
     if q:

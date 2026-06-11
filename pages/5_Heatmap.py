@@ -49,12 +49,15 @@ def _node(d, name, level):
     avg_eps = d["EPS"].replace(0,float("nan")).mean()
     avg_bet = d["Beta"].replace(0,float("nan")).mean()
     avg_chg = d["Change %"].mean()
+    t_rev   = d["Revenue (₹Cr)"].sum()
+    t_ni    = d["Net Inc (₹Cr)"].sum()
     return {"name":name,"value":[round(d["Mkt Cap (₹Cr)"].sum(),1),round(avg_chg,2)],
             "level":level,
             "totalMcap":f"₹{d['Mkt Cap (₹Cr)'].sum():,.0f} Cr",
             "avgPE":_safe(avg_pe,"{:.1f}"),"avgPB":_safe(avg_pb,"{:.2f}"),
             "avgEPS":"₹"+_safe(avg_eps,"{:.2f}"),
-            "totalRev":"—","totalNI":"—",
+            "totalRev":f"₹{t_rev:,.0f} Cr" if t_rev else "—",
+            "totalNI":f"₹{t_ni:,.0f} Cr" if t_ni else "—",
             "avgDiv":f"{d['Div Yield %'].mean():.2f}%","avgChg":f"{avg_chg:+.2f}%",
             "avgBeta":_safe(avg_bet,"{:.2f}"),"nStocks":str(len(d))}
 
@@ -73,7 +76,8 @@ for cap in hm["Cap Category"].unique():
                 "chgRaw":round(s["Change %"],2),"chg":f"{s['Change %']:+.2f}%",
                 "mcap":f"₹{s['Mkt Cap (₹Cr)']:,.0f} Cr","pe":_safe(s["P/E"],"{:.1f}"),
                 "pb":_safe(s["P/B"],"{:.2f}"),"eps":"₹"+_safe(s["EPS"],"{:.2f}"),
-                "rev":"—","ni":"—",
+                "rev":f"₹{s['Revenue (₹Cr)']:,.0f} Cr" if s["Revenue (₹Cr)"] else "—",
+                "ni":f"₹{s['Net Inc (₹Cr)']:,.0f} Cr" if s["Net Inc (₹Cr)"] else "—",
                 "div":f"{s['Div Yield %']:.2f}%","beta":_safe(s["Beta"],"{:.2f}"),
                 "sector":s["Sector"]})
         sn["children"] = stks; secs.append(sn)
