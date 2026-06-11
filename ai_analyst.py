@@ -10,12 +10,28 @@ load_dotenv()
 
 _client = None
 
+
+def _groq_key() -> str:
+    key = os.getenv("GROQ_API_KEY", "")
+    if not key:
+        try:
+            import streamlit as st
+            key = st.secrets.get("GROQ_API_KEY", "")
+        except Exception:
+            pass
+    return key
+
+
 def _get_client():
     global _client
     if _client is None:
-        key = os.getenv("GROQ_API_KEY", "")
+        key = _groq_key()
         if not key:
-            raise ValueError("GROQ_API_KEY not set")
+            raise ValueError(
+                "GROQ_API_KEY not set. "
+                "Local: add it to .env. "
+                "Cloud: add it to Streamlit Secrets (app settings → Secrets)."
+            )
         _client = Groq(api_key=key)
     return _client
 

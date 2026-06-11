@@ -117,12 +117,26 @@ with right:
         # Financial tables
         ft = st.tabs(["Quarterly","P&L","Balance Sheet","Cash Flow","Ratios","Shareholding"])
 
+        _tables = ["quarterly","pnl","balance_sheet","cash_flow","fin_ratios","shareholding"]
+        _all_empty = all(
+            not isinstance(data.get(k), pd.DataFrame) or data.get(k, pd.DataFrame()).empty
+            for k in _tables
+        )
+        if _all_empty:
+            st.warning(
+                "Financial tables could not be loaded — Screener.in may be blocking "
+                "requests from cloud servers. "
+                f"[View {data.get('name','')} directly on Screener.in]"
+                f"(https://www.screener.in{chosen_url})",
+                icon="⚠️",
+            )
+
         def _tbl(df):
             if isinstance(df, pd.DataFrame) and not df.empty:
                 st.dataframe(df.style.set_properties(
                     **{"background-color":"#07111d","color":"#e2e8f0"}),
                     use_container_width=True)
-            else:
+            elif not _all_empty:
                 st.info("No data available.")
 
         with ft[0]: _tbl(data.get("quarterly", pd.DataFrame()))
@@ -208,11 +222,16 @@ with right:
             with st.spinner("Analysing…"):
                 ns  = get_news_summary(symbol_guess, data.get("name",""))
                 sig = get_ai_analysis(row, news_summary=ns)
-            label = ("BUY" if "BUY" in sig.upper()[:30]
-                     else "SELL" if "SELL" in sig.upper()[:30] else "HOLD")
-            bc = {"BUY":"badge-buy","SELL":"badge-sell","HOLD":"badge-hold"}[label]
-            st.markdown(f'<span class="badge {bc}">{label}</span>', unsafe_allow_html=True)
-            st.info(sig)
+            if sig.startswith("AI analysis unavailable"):
+                st.error(f"Groq error: {sig.split(':', 1)[-1].strip()}\n\n"
+                         "Check that **GROQ_API_KEY** is set in Streamlit Secrets "
+                         "(app settings → Secrets) or in your local `.env`.")
+            else:
+                label = ("BUY" if "BUY" in sig.upper()[:30]
+                         else "SELL" if "SELL" in sig.upper()[:30] else "HOLD")
+                bc = {"BUY":"badge-buy","SELL":"badge-sell","HOLD":"badge-hold"}[label]
+                st.markdown(f'<span class="badge {bc}">{label}</span>', unsafe_allow_html=True)
+                st.info(sig)
 
         # News sentiment
         st.markdown('<div class="section-hd">📰 News Sentiment</div>', unsafe_allow_html=True)

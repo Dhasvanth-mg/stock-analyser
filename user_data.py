@@ -14,26 +14,39 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_LOCAL_PATH  = os.path.join(os.path.dirname(__file__), "user_data.json")
-_GIST_ID     = os.getenv("GIST_ID", "")
-_GH_TOKEN    = os.getenv("GITHUB_TOKEN", "")
-_GIST_FILE   = "nse_user_data.json"
-_DEFAULTS    = {"watchlist": ["RELIANCE", "TCS", "HDFCBANK", "WIPRO"]}
-_USE_GIST    = bool(_GIST_ID and _GH_TOKEN)
+_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "user_data.json")
+_GIST_FILE  = "nse_user_data.json"
+_DEFAULTS   = {"watchlist": ["RELIANCE", "TCS", "HDFCBANK", "WIPRO"]}
+
+
+def _secret(key: str) -> str:
+    val = os.getenv(key, "")
+    if not val:
+        try:
+            import streamlit as st
+            val = st.secrets.get(key, "")
+        except Exception:
+            pass
+    return val
+
+
+def _gist_id()   -> str: return _secret("GIST_ID")
+def _gh_token()  -> str: return _secret("GITHUB_TOKEN")
+def _use_gist()  -> bool: return bool(_gist_id() and _gh_token())
 
 
 # ── Gist backend ──────────────────────────────────────────────────────────────
 
 def _gist_headers() -> dict:
     return {
-        "Authorization": f"token {_GH_TOKEN}",
+        "Authorization": f"token {_gh_token()}",
         "Accept": "application/vnd.github+json",
     }
 
 
 def _gist_load() -> dict:
     r = requests.get(
-        f"https://api.github.com/gists/{_GIST_ID}",
+        f"https://api.github.com/gists/{_gist_id()}",
         headers=_gist_headers(), timeout=6,
     )
     r.raise_for_status()
@@ -43,7 +56,7 @@ def _gist_load() -> dict:
 
 def _gist_save(data: dict) -> None:
     requests.patch(
-        f"https://api.github.com/gists/{_GIST_ID}",
+        f"https://api.github.com/gists/{_gist_id()}",
         headers=_gist_headers(), timeout=6,
         json={"files": {_GIST_FILE: {"content": json.dumps(data, indent=2)}}},
     )
@@ -68,7 +81,7 @@ def _file_save(data: dict) -> None:
 
 def _load() -> dict:
     try:
-        data = _gist_load() if _USE_GIST else _file_load()
+        data = _gist_load() if _use_gist() else _file_load()
     except Exception:
         data = {}
     for k, v in _DEFAULTS.items():
@@ -78,7 +91,7 @@ def _load() -> dict:
 
 def _save(data: dict) -> None:
     try:
-        _gist_save(data) if _USE_GIST else _file_save(data)
+        _gist_save(data) if _use_gist() else _file_save(data)
     except Exception:
         pass
 

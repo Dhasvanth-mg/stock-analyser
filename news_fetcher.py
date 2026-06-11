@@ -247,7 +247,15 @@ def analyze_sentiment(articles_json: str, chunk_size: int = 20) -> pd.DataFrame:
     if articles.empty:
         return articles
 
-    client   = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
+    key = os.getenv("GROQ_API_KEY", "")
+    if not key:
+        try:
+            key = st.secrets.get("GROQ_API_KEY", "")
+        except Exception:
+            pass
+    if not key:
+        return articles  # return unscored rather than crash
+    client   = Groq(api_key=key)
     heads    = articles["title"].str[:300].tolist()
     results  = []
 

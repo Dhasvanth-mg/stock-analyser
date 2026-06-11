@@ -13,6 +13,13 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from datetime import date, timedelta
 
+try:
+    from curl_cffi import requests as _cffi
+    _CFFI_SESSION = _cffi.Session()
+    _HAS_CFFI = True
+except Exception:
+    _HAS_CFFI = False
+
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -55,6 +62,13 @@ def search_screener(query: str) -> list[dict]:
 # ── Company page scraping ─────────────────────────────────────────────────────
 
 def _get_soup(url: str) -> BeautifulSoup | None:
+    if _HAS_CFFI:
+        try:
+            r = _CFFI_SESSION.get(url, impersonate="chrome120", timeout=20)
+            r.raise_for_status()
+            return BeautifulSoup(r.text, "lxml")
+        except Exception:
+            pass
     try:
         r = requests.get(url, headers=_HEADERS, timeout=15)
         r.raise_for_status()

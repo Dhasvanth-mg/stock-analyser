@@ -69,16 +69,20 @@ with right:
         nbg = {"Positive":"rgba(16,185,129,.12)","Negative":"rgba(239,68,68,.12)",
                "Neutral":"rgba(59,130,246,.12)"}.get(nl,"rgba(59,130,246,.12)")
 
-        pill_row = st.columns([1, 3])
-        pill_row[0].markdown(f'<span class="badge {bc}">{sig}</span>', unsafe_allow_html=True)
-        if ns.get("count", 0):
-            pill_row[1].markdown(
-                f'<span style="background:{nbg};color:{nc};padding:3px 11px;border-radius:20px;'
-                f'font-size:.73rem;font-weight:600;border:1px solid {nc}44">'
-                f'📰 News: {nl} {oc:+.2f} · {ns["count"]} articles</span>',
-                unsafe_allow_html=True)
-
-        st.info(analysis)
+        if analysis.startswith("AI analysis unavailable"):
+            st.error(f"Groq error: {analysis.split(':', 1)[-1].strip()}\n\n"
+                     "Check that **GROQ_API_KEY** is set in Streamlit Secrets "
+                     "(app settings → Secrets) or in your local `.env`.")
+        else:
+            pill_row = st.columns([1, 3])
+            pill_row[0].markdown(f'<span class="badge {bc}">{sig}</span>', unsafe_allow_html=True)
+            if ns.get("count", 0):
+                pill_row[1].markdown(
+                    f'<span style="background:{nbg};color:{nc};padding:3px 11px;border-radius:20px;'
+                    f'font-size:.73rem;font-weight:600;border:1px solid {nc}44">'
+                    f'📰 News: {nl} {oc:+.2f} · {ns["count"]} articles</span>',
+                    unsafe_allow_html=True)
+            st.info(analysis)
         r = df[df["Symbol"] == ai_sym].iloc[0]
         m1,m2,m3,m4 = st.columns(4)
         m1.metric("Price",   f"₹{r['Price (₹)']}", f"{r['Change %']:+.2f}%")
