@@ -282,3 +282,102 @@ def fetch_history(symbol: str, period: str = "6mo") -> pd.DataFrame:
         return df
     except Exception:
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_financials_yf(symbol: str) -> dict:
+    """
+    Financial statements + key ratios for an NSE symbol via yfinance.
+    Returns the same dict shape expected by Deep Search tabs.
+    All monetary values in ₹ Cr.
+    """
+    t = yf.Ticker(f"{symbol}.NS")
+
+    def _to_cr(df) -> pd.DataFrame:
+        if df is None or (hasattr(df, "empty") and df.empty):
+            return pd.DataFrame()
+        try:
+            out = df.T.copy()
+            out = out.sort_index(ascending=False)
+            # Friendly period labels
+            out.index = pd.to_datetime(out.index).strftime("%b %Y")
+            out = out.reset_index().rename(columns={"index": "Period"})
+            # Convert full INR → ₹ Cr  (1 Cr = 10^7)
+            num = out.select_dtypes(include="number").columns
+            out[num] = (out[num] / 1e7).round(1)
+            # Clean up column names
+            out.columns = [
+                c if c == "Period" else str(c).replace("_", " ").strip()
+                for c in out.columns
+            ]
+            return out
+        except Exception:
+            return pd.DataFrame()
+
+    def _attr(primary, fallback=None):
+        try:
+            df = getattr(t, primary, None)
+            if (df is None or df.empty) and fallback:
+                df = getattr(t, fallback, None)
+            return df
+        except Exception:
+            return None
+
+    quarterly  = _to_cr(_attr("quarterly_income_stmt", "quarterly_financials"))
+    pnl        = _to_cr(_attr("income_stmt",           "financials"))
+    bal        = _to_cr(_attr("quarterly_balance_sheet","balance_sheet"))
+    cf         = _to_cr(_attr("quarterly_cashflow",    "cashflow"))
+
+    # Shareholding from major_holders
+    sh = pd.DataFrame()
+    try:
+        mh = t.major_holders
+        if mh is not None and not mh.empty:
+            mh = mh.copy()
+            mh.columns = ["Value", "Category"]
+            sh = mh[["Category", "Value"]].reset_index(drop=True)
+    except Exception:
+        pass
+
+    # Key ratios from .info
+    fin_ratios = pd.DataFrame()
+    try:
+        info = t.info or {}
+
+        def _f(key, mult=1.0, fmt="{:.2f}", suffix=""):
+            v = info.get(key)
+            if v is None:
+                return "—"
+            try:
+                return fmt.format(float(v) * mult) + suffix
+            except Exception:
+                return str(v)
+
+        rows = [
+            ("P/E (TTM)",       _f("trailingPE",       fmt="{:.1f}")),
+            ("P/B",             _f("priceToBook")),
+            ("EPS (TTM)",       _f("trailingEps",       fmt="₹{:.2f}")),
+            ("ROE",             _f("returnOnEquity",    100, "{:.1f}", "%")),
+            ("ROA",             _f("returnOnAssets",    100, "{:.1f}", "%")),
+            ("Profit Margin",   _f("profitMargins",     100, "{:.1f}", "%")),
+            ("Debt / Equity",   _f("debtToEquity")),
+            ("Current Ratio",   _f("currentRatio")),
+            ("Div Yield",       _f("dividendYield",     100, "{:.2f}", "%")),
+            ("Beta",            _f("beta")),
+            ("52W High",        _f("fiftyTwoWeekHigh",  fmt="₹{:.2f}")),
+            ("52W Low",         _f("fiftyTwoWeekLow",   fmt="₹{:.2f}")),
+            ("Revenue (₹ Cr)",  _f("totalRevenue",      1/1e7, "₹{:,.0f}")),
+            ("Mkt Cap (₹ Cr)",  _f("marketCap",         1/1e7, "₹{:,.0f}")),
+        ]
+        fin_ratios = pd.DataFrame(rows, columns=["Metric", "Value"])
+    except Exception:
+        pass
+
+    return {
+        "quarterly":     quarterly,
+        "pnl":           pnl,
+        "balance_sheet": bal,
+        "cash_flow":     cf,
+        "fin_ratios":    fin_ratios,
+        "shareholding":  sh,
+    }

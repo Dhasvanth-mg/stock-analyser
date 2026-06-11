@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from utils import inject_css, render_header, page_cfg, render_nav, candle_with_rsi, _CHART_BG
 
 from screener_search import search_screener, fetch_company_data, fetch_bse_announcements, get_bse_code
-from data_fetcher import fetch_single_stock, resolve_and_fetch_history
+from data_fetcher import fetch_single_stock, resolve_and_fetch_history, fetch_financials_yf
 from news_fetcher import get_news_summary
 from ai_analyst import get_ai_analysis
 
@@ -74,6 +74,10 @@ with right:
         if not data:
             st.error("Could not load data from Screener.in."); st.stop()
 
+        # Determine NSE symbol early (needed by multiple sections)
+        _nse = data.get("nse_code", "").strip()
+        _sym = _nse or symbol_guess
+
         # Company banner
         st.markdown(
             f"<div class='card card-accent-blue'>"
@@ -83,7 +87,7 @@ with right:
             f"style='color:#60a5fa'>Open on Screener.in ↗</a></span></div>",
             unsafe_allow_html=True)
 
-        # Key ratios
+        # Key ratios (from Screener.in static HTML — usually loads fine)
         ratios = data.get("ratios", {})
         if ratios:
             st.markdown('<div class="section-hd">Key Ratios</div>', unsafe_allow_html=True)
@@ -91,7 +95,7 @@ with right:
             for i, (k, v) in enumerate(list(ratios.items())[:12]):
                 rcols[i % 4].metric(k, v)
 
-        # Pros & Cons
+        # Pros & Cons (from Screener.in static HTML)
         pros, cons = data.get("pros", []), data.get("cons", [])
         if pros or cons:
             pc1, pc2 = st.columns(2)
@@ -114,71 +118,57 @@ with right:
                             f"margin-bottom:4px;font-size:.82rem;color:#f87171'>{c}</div>",
                             unsafe_allow_html=True)
 
-        # Financial tables
+        # ── Financial tables (yfinance — works on all environments) ───────────
+        st.markdown('<div class="section-hd">📊 Financials <span style="font-size:.72rem;color:#475569;font-weight:400">via yfinance · ₹ Cr</span></div>',
+                    unsafe_allow_html=True)
+
+        with st.spinner(f"Loading financials for {_sym}…"):
+            fin = fetch_financials_yf(_sym)
+
         ft = st.tabs(["Quarterly","P&L","Balance Sheet","Cash Flow","Ratios","Shareholding"])
 
-        _tables = ["quarterly","pnl","balance_sheet","cash_flow","fin_ratios","shareholding"]
-        _all_empty = all(
-            not isinstance(data.get(k), pd.DataFrame) or data.get(k, pd.DataFrame()).empty
-            for k in _tables
-        )
-        if _all_empty:
-            st.warning(
-                "Financial tables could not be loaded — Screener.in may be blocking "
-                "requests from cloud servers. "
-                f"[View {data.get('name','')} directly on Screener.in]"
-                f"(https://www.screener.in{chosen_url})",
-                icon="⚠️",
-            )
-
-        def _tbl(df):
+        def _tbl(df, label="data"):
             if isinstance(df, pd.DataFrame) and not df.empty:
-                st.dataframe(df.style.set_properties(
-                    **{"background-color":"#07111d","color":"#e2e8f0"}),
+                st.dataframe(
+                    df.style.set_properties(**{"background-color":"#07111d","color":"#e2e8f0"}),
                     use_container_width=True)
-            elif not _all_empty:
-                st.info("No data available.")
+            else:
+                st.info(f"No {label} available for {_sym}.")
 
-        with ft[0]: _tbl(data.get("quarterly", pd.DataFrame()))
-        with ft[1]:
-            pnl = data.get("pnl", pd.DataFrame()); _tbl(pnl)
-        with ft[2]: _tbl(data.get("balance_sheet", pd.DataFrame()))
-        with ft[3]: _tbl(data.get("cash_flow",     pd.DataFrame()))
-        with ft[4]: _tbl(data.get("fin_ratios",     pd.DataFrame()))
+        with ft[0]: _tbl(fin.get("quarterly", pd.DataFrame()), "quarterly results")
+        with ft[1]: _tbl(fin.get("pnl",       pd.DataFrame()), "P&L data")
+        with ft[2]: _tbl(fin.get("balance_sheet", pd.DataFrame()), "balance sheet")
+        with ft[3]: _tbl(fin.get("cash_flow",  pd.DataFrame()), "cash flow")
+        with ft[4]: _tbl(fin.get("fin_ratios", pd.DataFrame()), "ratio data")
         with ft[5]:
-            sh = data.get("shareholding", pd.DataFrame()); _tbl(sh)
-            if not sh.empty:
+            sh = fin.get("shareholding", pd.DataFrame())
+            _tbl(sh, "shareholding")
+            # yfinance major_holders gives % insider / institutional — show as bar
+            if not sh.empty and "Value" in sh.columns:
                 try:
-                    lc   = sh.columns[-1]
-                    excl = r"shareholders|no\.\s*of|number of"
-                    incl = r"promoter|dii|fii|public|govern|mutual|insurance|other"
-                    sp   = sh[sh.iloc[:,0].astype(str).str.lower().str.contains(incl,na=False) |
-                              ~sh.iloc[:,0].astype(str).str.lower().str.contains(excl,na=False)]
-                    sp   = sp.copy()
-                    sp["_v"] = pd.to_numeric(sp[lc].astype(str).str.replace("%","").str.replace(",",""),
-                                             errors="coerce")
-                    sp   = sp[(sp["_v"]>0) & (sp["_v"]<=100)]
-                    if not sp.empty:
-                        fig_sh = go.Figure(go.Pie(
-                            labels=sp.iloc[:,0].astype(str).tolist(),
-                            values=sp["_v"].tolist(), hole=.5,
-                            marker_colors=["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4"],
-                            textinfo="label+percent",
-                            hovertemplate="<b>%{label}</b><br>%{value:.2f}%<extra></extra>"))
-                        fig_sh.update_layout(paper_bgcolor="#07111d",template="plotly_dark",
-                            height=320,margin=dict(l=0,r=0,t=28,b=0),
-                            legend=dict(orientation="h",y=-.1),
-                            title=dict(text=f"Shareholding — {lc}",
-                                       font=dict(color="#94a3b8")))
+                    vals = sh["Value"].astype(str).str.replace("%", "").str.strip()
+                    nums = pd.to_numeric(vals, errors="coerce").dropna()
+                    cats = sh.loc[nums.index, "Category"].astype(str)
+                    if not nums.empty:
+                        fig_sh = go.Figure(go.Bar(
+                            x=cats.tolist(), y=nums.tolist(),
+                            marker_color=["#3b82f6","#10b981","#f59e0b","#ef4444"],
+                            text=[f"{v:.1f}%" for v in nums.tolist()],
+                            textposition="outside"))
+                        fig_sh.update_layout(
+                            paper_bgcolor="#07111d", plot_bgcolor="#07111d",
+                            template="plotly_dark", height=280,
+                            margin=dict(l=0, r=0, t=20, b=0),
+                            yaxis=dict(showgrid=False),
+                            font=dict(color="#94a3b8"))
                         st.plotly_chart(fig_sh, use_container_width=True)
-                except Exception: pass
+                except Exception:
+                    pass
 
         # Price chart
         st.markdown('<div class="section-hd">📈 Price Chart</div>', unsafe_allow_html=True)
         dp = st.radio("Period", ["1mo","3mo","6mo","1y","2y"], index=2,
                       horizontal=True, key="ds_per")
-        _nse  = data.get("nse_code","").strip()
-        _sym  = _nse or symbol_guess
         with st.spinner(f"Loading chart for {_sym}…"):
             hist, ticker = resolve_and_fetch_history(_sym, dp)
         if hist.empty and _sym != symbol_guess:
