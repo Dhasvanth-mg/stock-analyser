@@ -20,18 +20,36 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 def _yf_session():
     """
     Shared curl_cffi session + crumb for Yahoo Finance v7 API.
-    Visiting finance.yahoo.com first sets the required cookies.
+    fc.yahoo.com sets the auth cookie (its 404 response is expected);
+    the crumb must match that cookie or v7 returns 401 Invalid Crumb.
     """
     try:
         from curl_cffi import requests as cffi
         s = cffi.Session(impersonate="chrome120")
-        s.get("https://finance.yahoo.com/", timeout=15)
-        crumb = s.get(
-            "https://query2.finance.yahoo.com/v1/test/getcrumb", timeout=10
-        ).text.strip()
-        return s, crumb
     except Exception:
         return None, ""
+
+    def _get_crumb() -> str:
+        try:
+            c = s.get("https://query2.finance.yahoo.com/v1/test/getcrumb",
+                      timeout=10).text.strip()
+            # A real crumb is ~11 chars; error responses are JSON or empty
+            return c if c and len(c) <= 16 and "{" not in c else ""
+        except Exception:
+            return ""
+
+    try:
+        s.get("https://fc.yahoo.com/", timeout=10)
+    except Exception:
+        pass
+    crumb = _get_crumb()
+    if not crumb:
+        try:
+            s.get("https://finance.yahoo.com/", timeout=15)
+        except Exception:
+            pass
+        crumb = _get_crumb()
+    return s, crumb
 
 
 def _bulk_quote(symbols: list[str]) -> dict:
@@ -41,8 +59,8 @@ def _bulk_quote(symbols: list[str]) -> dict:
     Returns {SYMBOL.NS: quote_dict}.
     """
     session, crumb = _yf_session()
-    if not session:
-        return {}
+    if not session or not crumb:
+        return {}  # v7 without a valid crumb is a guaranteed 401
 
     results = {}
     tickers = [f"{s}.NS" for s in symbols]
@@ -74,6 +92,49 @@ def _bulk_quote(symbols: list[str]) -> dict:
             time.sleep(0.15)  # rate-limit buffer between batches
 
     return results
+
+
+_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+}
+
+
+def _spark_batch(tickers: list[str]) -> dict:
+    """
+    Crumb-free price + change via Yahoo spark API (same backend as charts,
+    which work even when v7/quoteSummary are blocked on datacenter IPs).
+    Returns {ticker: (price, change_pct)}.
+    """
+    session, _ = _yf_session()
+    out = {}
+    for i in range(0, len(tickers), 40):
+        batch = tickers[i : i + 40]
+        params = {"symbols": ",".join(batch), "range": "5d", "interval": "1d"}
+        try:
+            if session:
+                r = session.get("https://query1.finance.yahoo.com/v7/finance/spark",
+                                params=params, timeout=25)
+            else:
+                r = requests.get("https://query1.finance.yahoo.com/v7/finance/spark",
+                                 params=params, headers=_BROWSER_HEADERS, timeout=25)
+            for res in r.json().get("spark", {}).get("result", []) or []:
+                sym  = res.get("symbol", "")
+                resp = (res.get("response") or [{}])[0]
+                meta = resp.get("meta", {}) or {}
+                q      = (resp.get("indicators", {}).get("quote") or [{}])[0]
+                closes = [c for c in (q.get("close") or []) if c is not None]
+                price = meta.get("regularMarketPrice") or (closes[-1] if closes else 0)
+                prev  = closes[-2] if len(closes) >= 2 else (meta.get("chartPreviousClose") or price)
+                if price:
+                    chg = ((price - prev) / prev * 100) if prev else 0
+                    out[sym] = (round(float(price), 2), round(float(chg), 2))
+        except Exception:
+            continue
+        if i + 40 < len(tickers):
+            time.sleep(0.1)
+    return out
 
 # ── NSE archive headers (required to avoid 403) ───────────────────────────────
 _NSE_HEADERS = {
@@ -314,11 +375,58 @@ def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
         if rows:
             return pd.DataFrame(rows)
 
-    # Fallback: per-ticker ThreadPoolExecutor (slower but works if v7 API is down)
-    rows = []
+    # Fallback 2: crumb-free spark API — price/change only, fundamentals stay 0
+    spark = _spark_batch([f"{s}.NS" for s in symbols])
+    if spark:
+        rows = []
+        for sym in symbols:
+            price, chg = spark.get(f"{sym}.NS", (0.0, 0.0))
+            if not price:
+                continue
+            rows.append({
+                "Symbol":        sym,
+                "Name":          sym,
+                "Sector":        sector_map.get(sym, "—"),
+                "Cap Category":  cap_labels.get(sym, "Small Cap"),
+                "Price (₹)":     price,
+                "Change %":      chg,
+                "Day High":      price,
+                "Day Low":       price,
+                "52W High":      0,
+                "52W Low":       0,
+                "Volume":        0,
+                "Mkt Cap (₹Cr)": 0,
+                "Revenue (₹Cr)": 0,
+                "Net Inc (₹Cr)": 0,
+                "P/E":           0,
+                "P/B":           0,
+                "EPS":           0,
+                "Div Yield %":   0,
+                "Beta":          0,
+            })
+        if rows:
+            return pd.DataFrame(rows)
+
+    # Last resort: per-ticker .info via ThreadPool. Probe one symbol first —
+    # if .info is blocked (401 from datacenter IP), don't hammer Yahoo with
+    # hundreds of doomed requests.
+    if not symbols:
+        return pd.DataFrame()
+    probe = _fetch_one(symbols[0], cap_labels, sector_map)
+    if probe is None and len(symbols) > 1:
+        probe = _fetch_one(symbols[1], cap_labels, sector_map)
+        if probe is None:
+            return pd.DataFrame()
+        done = {symbols[0], symbols[1]}
+    else:
+        if probe is None:
+            return pd.DataFrame()
+        done = {symbols[0]}
+
+    rows = [probe]
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(_fetch_one, sym, cap_labels, sector_map): sym
-                   for sym in symbols}
+                   for sym in symbols if sym not in done}
         for future in as_completed(futures):
             result = future.result()
             if result:
@@ -328,9 +436,36 @@ def fetch_stock_batch(symbols: list[str]) -> pd.DataFrame:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_single_stock(symbol: str) -> dict | None:
-    """Fetch yfinance data for one symbol — used by Deep Search."""
+    """Fetch live data for one symbol — used by Deep Search. v7 batch first."""
     cap_labels, sector_map = load_universe()
-    return _fetch_one(symbol.upper(), cap_labels, sector_map)
+    sym = symbol.upper()
+
+    q = _bulk_quote([sym]).get(f"{sym}.NS")
+    if q:
+        price = q.get("regularMarketPrice") or 0
+        if price:
+            return {
+                "Symbol":        sym,
+                "Name":          q.get("longName") or q.get("shortName") or sym,
+                "Sector":        sector_map.get(sym) or "—",
+                "Cap Category":  cap_labels.get(sym, "Small Cap"),
+                "Price (₹)":     round(price, 2),
+                "Change %":      round(q.get("regularMarketChangePercent") or 0, 2),
+                "Day High":      round(q.get("regularMarketDayHigh") or price, 2),
+                "Day Low":       round(q.get("regularMarketDayLow") or price, 2),
+                "52W High":      round(q.get("fiftyTwoWeekHigh") or 0, 2),
+                "52W Low":       round(q.get("fiftyTwoWeekLow") or 0, 2),
+                "Volume":        int(q.get("regularMarketVolume") or 0),
+                "Mkt Cap (₹Cr)": round((q.get("marketCap") or 0) / 1e7, 1),
+                "Revenue (₹Cr)": 0,
+                "Net Inc (₹Cr)": 0,
+                "P/E":           round(q.get("trailingPE") or 0, 2),
+                "P/B":           round(q.get("priceToBook") or 0, 2),
+                "EPS":           round(q.get("epsTrailingTwelveMonths") or 0, 2),
+                "Div Yield %":   round((q.get("trailingAnnualDividendYield") or 0) * 100, 2),
+                "Beta":          round(q.get("beta") or 0, 2),
+            }
+    return _fetch_one(sym, cap_labels, sector_map)
 
 
 @st.cache_data(ttl=1800, show_spinner=False)

@@ -122,18 +122,17 @@ PERIOD_MAP = {
 # ── Data helpers ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
 def _batch_index_quotes(tickers: tuple) -> dict:
-    """One v7 batch request for all index tickers; per-ticker yfinance fallback."""
-    from data_fetcher import _yf_session
+    """One v7 batch request for all index tickers; crumb-free spark fallback."""
+    from data_fetcher import _yf_session, _spark_batch
     session, crumb = _yf_session()
     out = {}
-    if session:
+    if session and crumb:
         params = {
             "symbols":    ",".join(tickers),
             "formatted":  "false",
             "corsDomain": "finance.yahoo.com",
+            "crumb":      crumb,
         }
-        if crumb:
-            params["crumb"] = crumb
         try:
             r = session.get(
                 "https://query2.finance.yahoo.com/v7/finance/quote",
@@ -146,15 +145,11 @@ def _batch_index_quotes(tickers: tuple) -> dict:
                 out[sym] = (round(p, 2), round(((p - pc) / pc * 100) if pc else 0, 2))
         except Exception:
             pass
+    missing = [t for t in tickers if t not in out]
+    if missing:
+        out.update(_spark_batch(missing))
     for t in tickers:
-        if t not in out:
-            try:
-                info = yf.Ticker(t).info
-                p  = info.get("regularMarketPrice") or info.get("currentPrice") or 0
-                pc = info.get("regularMarketPreviousClose") or info.get("previousClose") or p
-                out[t] = (round(p, 2), round(((p - pc) / pc * 100) if pc else 0, 2))
-            except Exception:
-                out[t] = (0.0, 0.0)
+        out.setdefault(t, (0.0, 0.0))
     return out
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -186,16 +181,14 @@ quotes = _batch_index_quotes(_idx_tickers)
 @st.cache_data(ttl=120, show_spinner=False)
 def _wl_quote(sym: str):
     """Fast price + change + sparkline for a watchlist symbol."""
-    from data_fetcher import _yf_session
+    from data_fetcher import _yf_session, _spark_batch
     price, chg, name = 0.0, 0.0, sym
 
-    # v7 batch API first (cloud-compatible)
+    # v7 batch API first (needs valid crumb)
     session, crumb = _yf_session()
-    if session:
+    if session and crumb:
         params = {"symbols": f"{sym}.NS", "formatted": "false",
-                  "corsDomain": "finance.yahoo.com"}
-        if crumb:
-            params["crumb"] = crumb
+                  "corsDomain": "finance.yahoo.com", "crumb": crumb}
         try:
             r  = session.get("https://query2.finance.yahoo.com/v7/finance/quote",
                              params=params, timeout=10)
@@ -209,16 +202,10 @@ def _wl_quote(sym: str):
         except Exception:
             pass
 
-    # Fallback: yfinance .info
+    # Fallback: crumb-free spark API
     if not price:
-        try:
-            info  = yf.Ticker(f"{sym}.NS").info or {}
-            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-            pc    = info.get("previousClose") or info.get("regularMarketPreviousClose") or price
-            name  = info.get("shortName") or info.get("longName") or sym
-            chg   = ((price - pc) / pc * 100) if pc else 0
-        except Exception:
-            pass
+        sp = _spark_batch([f"{sym}.NS"])
+        price, chg = sp.get(f"{sym}.NS", (0.0, 0.0))
 
     # Sparkline via history (separate call, less blocked)
     intra = pd.DataFrame()
