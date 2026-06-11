@@ -121,14 +121,41 @@ PERIOD_MAP = {
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-def _quote(ticker):
-    try:
-        info = yf.Ticker(ticker).info
-        p  = info.get("regularMarketPrice") or info.get("currentPrice") or 0
-        pc = info.get("regularMarketPreviousClose") or info.get("previousClose") or p
-        return round(p, 2), round(((p - pc) / pc * 100) if pc else 0, 2)
-    except Exception:
-        return 0.0, 0.0
+def _batch_index_quotes(tickers: tuple) -> dict:
+    """One v7 batch request for all index tickers; per-ticker yfinance fallback."""
+    from data_fetcher import _yf_session
+    session, crumb = _yf_session()
+    out = {}
+    if session:
+        params = {
+            "symbols":    ",".join(tickers),
+            "formatted":  "false",
+            "corsDomain": "finance.yahoo.com",
+        }
+        if crumb:
+            params["crumb"] = crumb
+        try:
+            r = session.get(
+                "https://query2.finance.yahoo.com/v7/finance/quote",
+                params=params, timeout=20,
+            )
+            for q in r.json().get("quoteResponse", {}).get("result", []):
+                sym = q.get("symbol", "")
+                p   = q.get("regularMarketPrice") or 0
+                pc  = q.get("regularMarketPreviousClose") or p
+                out[sym] = (round(p, 2), round(((p - pc) / pc * 100) if pc else 0, 2))
+        except Exception:
+            pass
+    for t in tickers:
+        if t not in out:
+            try:
+                info = yf.Ticker(t).info
+                p  = info.get("regularMarketPrice") or info.get("currentPrice") or 0
+                pc = info.get("regularMarketPreviousClose") or info.get("previousClose") or p
+                out[t] = (round(p, 2), round(((p - pc) / pc * 100) if pc else 0, 2))
+            except Exception:
+                out[t] = (0.0, 0.0)
+    return out
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _nifty50(period="3mo", interval="1d"):
@@ -151,28 +178,60 @@ def _intraday(ticker):
     except Exception:
         return pd.DataFrame()
 
-# Fetch all quotes upfront
-quotes = {t: _quote(t) for _, t in INDICES}
+# Fetch all index quotes in one batch request
+_idx_tickers = tuple(t for _, t in INDICES)
+quotes = _batch_index_quotes(_idx_tickers)
 
 # ── Watchlist (up to 4 favourites) ───────────────────────────────────────────
 @st.cache_data(ttl=120, show_spinner=False)
 def _wl_quote(sym: str):
-    """Fast price + change for a watchlist symbol."""
+    """Fast price + change + sparkline for a watchlist symbol."""
+    from data_fetcher import _yf_session
+    price, chg, name = 0.0, 0.0, sym
+
+    # v7 batch API first (cloud-compatible)
+    session, crumb = _yf_session()
+    if session:
+        params = {"symbols": f"{sym}.NS", "formatted": "false",
+                  "corsDomain": "finance.yahoo.com"}
+        if crumb:
+            params["crumb"] = crumb
+        try:
+            r  = session.get("https://query2.finance.yahoo.com/v7/finance/quote",
+                             params=params, timeout=10)
+            qs = r.json().get("quoteResponse", {}).get("result", [])
+            if qs:
+                q     = qs[0]
+                price = q.get("regularMarketPrice") or 0
+                pc    = q.get("regularMarketPreviousClose") or price
+                chg   = ((price - pc) / pc * 100) if pc else 0
+                name  = q.get("longName") or q.get("shortName") or sym
+        except Exception:
+            pass
+
+    # Fallback: yfinance .info
+    if not price:
+        try:
+            info  = yf.Ticker(f"{sym}.NS").info or {}
+            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+            pc    = info.get("previousClose") or info.get("regularMarketPreviousClose") or price
+            name  = info.get("shortName") or info.get("longName") or sym
+            chg   = ((price - pc) / pc * 100) if pc else 0
+        except Exception:
+            pass
+
+    # Sparkline via history (separate call, less blocked)
+    intra = pd.DataFrame()
     try:
-        t = yf.Ticker(f"{sym}.NS")
-        info = t.info or {}
-        p  = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-        pc = info.get("previousClose") or info.get("regularMarketPreviousClose") or p
-        name = info.get("shortName") or info.get("longName") or sym
-        chg  = ((p - pc) / pc * 100) if pc else 0
-        hist = t.history(period="5d", interval="5m")
+        hist = yf.Ticker(f"{sym}.NS").history(period="5d", interval="5m")
         hist.index = pd.to_datetime(hist.index)
         today = hist.index.max().date() if not hist.empty else None
         intra = hist[hist.index.date == today] if today else pd.DataFrame()
-        return {"sym": sym, "name": name[:22], "price": round(p,2),
-                "chg": round(chg, 2), "hist": intra}
     except Exception:
-        return {"sym": sym, "name": sym, "price": 0, "chg": 0, "hist": pd.DataFrame()}
+        pass
+
+    return {"sym": sym, "name": (name or sym)[:22],
+            "price": round(price, 2), "chg": round(chg, 2), "hist": intra}
 
 if "watchlist" not in st.session_state:
     st.session_state["watchlist"] = load_watchlist()
