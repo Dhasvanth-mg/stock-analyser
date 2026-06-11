@@ -14,6 +14,7 @@ import json
 import os
 import time
 import urllib.parse
+from io import StringIO
 import requests
 import feedparser
 import pandas as pd
@@ -243,7 +244,7 @@ def analyze_sentiment(articles_json: str, chunk_size: int = 20) -> pd.DataFrame:
     Batch-score articles through Groq in chunks of `chunk_size`.
     Accepts JSON string so Streamlit can cache it.
     """
-    articles = pd.read_json(articles_json)
+    articles = pd.read_json(StringIO(articles_json))
     if articles.empty:
         return articles
 
